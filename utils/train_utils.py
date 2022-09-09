@@ -28,7 +28,7 @@ def train_model(
     dataloader,
     num_epochs=100,
     log_every=5,
-    log_file="log.txt",
+    logger=None,
     train_device="cpu",
 ):
     since = time.time()
@@ -99,12 +99,14 @@ def train_model(
                     saved_model_path = os.path.join(config.experiment.base_path, "weights/")
                     if not os.path.exists(saved_model_path):
                         os.makedirs(saved_model_path)
-                    torch.save(
-                        model.state_dict(),
-                        os.path.join(
+                    full_path = os.path.join(
                             saved_model_path,
                             f"best_model_{config.experiment.name}_{hash:4x}.pt",
-                        ),
+                        )
+                    logger.debug(f"Saving checkpoint to {full_path}")
+                    torch.save(
+                        model.state_dict(),
+                        full_path,
                     )
 
                 if config.wandb.use_wandb:
@@ -131,25 +133,20 @@ def train_model(
                     )
                 )
                 if epoch % log_every == 0:
-                    log_filename = [part for part in log_file.split('/') if len(part) > 3][-1]
-                    log_folder_path = os.path.join(config.experiment.base_path, "logs/")
-                    if not os.path.exists(log_folder_path):
-                        os.makedirs(log_folder_path)
-                    with open(os.path.join(log_folder_path,log_filename), "a+") as f:
-                        f.write(
-                            "Epoch {}/{}:  "
-                            "train Loss: {:.4f}   "
-                            "val Loss: {:.4f}   "
-                            "time: {:.2f}s   "
-                            "best: {:.4f} \n".format(
-                                epoch + 1,
-                                num_epochs,
-                                train_loss,
-                                epoch_loss,
-                                epoch_end - epoch_start,
-                                best_loss,
-                            )
+                    logger.info(
+                        "Epoch {}/{}:  "
+                        "train Loss: {:.4f}   "
+                        "val Loss: {:.4f}   "
+                        "time: {:.2f}s   "
+                        "best: {:.4f}".format(
+                            epoch + 1,
+                            num_epochs,
+                            train_loss,
+                            epoch_loss,
+                            epoch_end - epoch_start,
+                            best_loss,
                         )
+                    )
             else:
                 train_loss = epoch_loss
                 scheduler.step()

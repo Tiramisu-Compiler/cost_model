@@ -137,16 +137,16 @@ class Model_Recursive_LSTM_v2(nn.Module):
 
     def forward(self, tree_tensors):
         tree, comps_tensor, loops_tensor = tree_tensors
+        
         # computation embbedding layer
         x = comps_tensor.to(self.train_device)
-
-        batch_size, num_comps, input_size = x.shape
+        batch_size, num_comps, __dict__ = x.shape
         x = x.view(batch_size * num_comps, -1)
         (first_part, final_matrix, vectors, third_part) = seperate_vector(
             x, num_matrices=5, pad=False
         )
         vectors = self.encode_vectors(vectors)
-        lstm_out, (prog_embedding, comps_c_n) = self.comps_embed(vectors)
+        _, (prog_embedding, _) = self.comps_embed(vectors)
 
         prog_embedding = prog_embedding.permute(1, 0, 2).reshape(
             batch_size * num_comps, -1
@@ -155,7 +155,6 @@ class Model_Recursive_LSTM_v2(nn.Module):
             (
                 first_part,
                 final_matrix.reshape(batch_size * num_comps, -1),
-                # vectors.reshape(batch_size*num_comps, -1),
                 prog_embedding,
                 third_part,
             ),
@@ -166,10 +165,12 @@ class Model_Recursive_LSTM_v2(nn.Module):
             x = self.comp_embedding_layers[i](x)
             x = self.comp_embedding_dropouts[i](self.ELU(x))
         comps_embeddings = x
+        
         # recursive loop embbeding layer
         prog_embedding = self.get_hidden_state(
             tree, comps_embeddings, loops_tensor.to(self.train_device)
         )
+        
         # regression layer
         x = prog_embedding
         for i in range(len(self.regression_layers)):

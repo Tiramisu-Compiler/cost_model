@@ -1,6 +1,7 @@
 import os
 import io
-
+import logging
+    
 import hydra
 from hydra.core.config_store import ConfigStore
 
@@ -35,12 +36,25 @@ def read_datasets(config):
 
 @hydra.main(config_path="conf", config_name="config")
 def main(config: RecursiveLSTMConfig):
-    global lstm_embed
+    # Defining logger
+    log_filename = [part for part in config.training.log_file.split('/') if len(part) > 3][-1]
+    log_folder_path = os.path.join(config.experiment.base_path, "logs/")
+    if not os.path.exists(log_folder_path):
+        os.makedirs(log_folder_path)
+    log_file = os.path.join(log_folder_path, log_filename)
+    logging.basicConfig(filename = log_file,
+                        filemode='a',
+                        level = logging.DEBUG,
+                        format = '%(asctime)s:%(levelname)s:  %(message)s')
+    logging.info(f"Starting experiment {config.experiment.name}")
+    
     # Reading data
-
+    logging.info("Reading the dataset")
     bl_dict = read_datasets(config)
     train_device = "cuda:0"
 
+    # Defining the model
+    logging.info("Defining the model")
     model = Model_Recursive_LSTM_v2(
         input_size=config.model.input_size,
         comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
@@ -56,13 +70,15 @@ def main(config: RecursiveLSTMConfig):
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.training.lr, weight_decay=0.15e-1
     )
-    log_file = os.path.join(config.experiment.base_path, config.training.log_file)
-
+    
+    logger = logging.getLogger()
+    
     if config.wandb.use_wandb:
         # Intializing wandb
         wandb.init(project=config.wandb.project)
         wandb.config = dict(config)
         wandb.watch(model)
+
 
     # Training
     print("Training the model")
@@ -74,7 +90,7 @@ def main(config: RecursiveLSTMConfig):
         max_lr=config.training.lr,
         dataloader=bl_dict,
         num_epochs=config.training.max_epochs,
-        log_file=log_file,
+        logger=logger,
         log_every=1,
         train_device=train_device,
     )

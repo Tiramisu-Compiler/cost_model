@@ -1,5 +1,5 @@
 experiment:
-    name: "bidirectional_new_data_static_input_nn_elu_smaller"
+    name: "bidirectional_static_input_nn"
     base_path: "/home/user/cost_model/recursive_lstm_cost_model"
 
 
@@ -27,7 +27,7 @@ wandb:
     project: "recursive_lstm"
     
 model: 
-    input_size: 776 #884
+    input_size: 776
     comp_embed_layer_sizes:
         - 600
         - 350
@@ -39,3 +39,6 @@ model:
         - 0.050
         - 0.050
         - 0.050
+
+defaults:
+  - override hydra/job_logging: disabled

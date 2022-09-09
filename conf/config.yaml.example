@@ -1,5 +1,5 @@
 experiment:
-    name: "recursive_lstm_cost_model"
+    name: "bidirectional_new_data_static_input_nn_elu_smaller"
     base_path: "/home/user/cost_model/recursive_lstm_cost_model"
 
 
@@ -12,8 +12,7 @@ data_generation:
 
 
 training: 
-    log_file: "logs/log.txt"
-    use_wandb: True
+    log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 500
 
@@ -22,9 +21,9 @@ testing:
         # - valid
         - bench
     checkpoint: "best_model.pt"
-    batch_size: 1024
 
 wandb:
+    use_wandb: True
     project: "recursive_lstm"
     
 model: 

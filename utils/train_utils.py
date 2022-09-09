@@ -107,7 +107,7 @@ def train_model(
                         ),
                     )
 
-                if config.training.use_wandb:
+                if config.wandb.use_wandb:
                     wandb.log(
                         {
                             "best_msle": best_loss,
@@ -131,7 +131,11 @@ def train_model(
                     )
                 )
                 if epoch % log_every == 0:
-                    with open(log_file, "a+") as f:
+                    log_filename = [part for part in log_file.split('/') if len(part) > 3][-1]
+                    log_folder_path = os.path.join(config.experiment.base_path, "logs/")
+                    if not os.path.exists(log_folder_path):
+                        os.makedirs(log_folder_path)
+                    with open(os.path.join(log_folder_path,log_filename), "a+") as f:
                         f.write(
                             "Epoch {}/{}:  "
                             "train Loss: {:.4f}   "

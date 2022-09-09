@@ -7,55 +7,6 @@ from utils.modeling import *
 from utils.train_utils import *
 
 
-def speedup_clip(speedup):
-    if speedup < 0.01:
-        speedup = 0.01
-    return speedup
-
-
-def drop_program(prog_dict):
-    if len(prog_dict["schedules_list"]) < 2:
-        return True
-    if has_skippable_loop_1comp(prog_dict):
-        return True
-    if (
-        "node_name" in prog_dict and prog_dict["node_name"] == "lanka24"
-    ):  # drop if we the program is run by lanka24 (because its measurements are inacurate)
-        return True
-    return False
-
-
-def drop_schedule(prog_dict, schedule_index):
-    schedule_json = prog_dict["schedules_list"][schedule_index]
-    schedule_str = sched_json_to_sched_str(schedule_json)
-    program_depth = len(prog_dict["program_annotation"]["iterators"])
-    if (not schedule_json["execution_times"]) or min(
-        schedule_json["execution_times"]
-    ) < 0:  # exec time is set to -1 on datapoints that are deemed noisy, or if list empty
-        return True
-    if (
-        len(prog_dict["program_annotation"]["computations"]) == 1
-    ):  # this function works only on single comp programs
-        if sched_is_prunable_1comp(schedule_str, program_depth):
-            return True
-    if wrongly_pruned_schedule(prog_dict, schedule_index):
-        return True
-
-    return False
-
-
-def default_eval(prog_dict, schedule_index):
-    schedule_json = prog_dict["schedules_list"][schedule_index]
-    schedule_str = sched_json_to_sched_str(schedule_json)
-    program_depth = len(prog_dict["program_annotation"]["iterators"])
-    if (
-        len(prog_dict["program_annotation"]["computations"]) == 1
-    ):  # this function works only on single comp programs
-        return can_set_default_eval_1comp(schedule_str, program_depth)
-    else:
-        return 0
-
-
 @hydra.main(config_path="conf", config_name="config")
 def generate_datasets(conf):
     """Converts and split into batches the validation and training dataset.

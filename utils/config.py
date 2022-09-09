@@ -18,7 +18,6 @@ class DataGenerationConfig:
 @dataclass
 class TrainConfig:
     log_file: str = "log.txt"
-    use_wandb: bool = True
     lr: float = 0.001
     max_epochs: int = 1000
 
@@ -38,6 +37,7 @@ class ModelConfig:
 
 @dataclass
 class WandbConfig:
+    use_wandb: bool = True
     project: str = "recursive_lstm"
 
 

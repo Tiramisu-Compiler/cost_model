@@ -9,32 +9,6 @@ from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
 
-from tqdm import tqdm
-
-BATCH_SIZE = 1024
-
-
-def fix(map_loc):
-    return lambda b: torch.load(io.BytesIO(b), map_location=map_loc)
-
-
-class MappedUnpickler(pickle.Unpickler):
-    def __init__(self, *args, map_location="cpu", **kwargs):
-        self._map_location = map_location
-        super().__init__(*args, **kwargs)
-
-    def find_class(self, module, name):
-        if module == "torch.storage" and name == "_load_from_bytes":
-            return fix(self._map_location)
-        else:
-            return super().find_class(module, name)
-
-
-def mapped_loads(s, map_location="cpu"):
-    bs = io.BytesIO(s)
-    unpickler = MappedUnpickler(bs, map_location=map_location)
-    return unpickler.load()
-
 
 def read_datasets(config):
     path = os.path.join(
@@ -84,7 +58,7 @@ def main(config: RecursiveLSTMConfig):
     )
     log_file = os.path.join(config.experiment.base_path, config.training.log_file)
 
-    if config.training.use_wandb:
+    if config.wandb.use_wandb:
         # Intializing wandb
         wandb.init(project=config.wandb.project)
         wandb.config = dict(config)

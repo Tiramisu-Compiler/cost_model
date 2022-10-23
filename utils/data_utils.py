@@ -501,7 +501,7 @@ def get_padded_transformation_matrix(
 ):
     # print(program_json["computations"],schedule_json[comp_name])
 
-    comp_name = list(program_json["computations"].keys())[0]
+    #comp_name = list(program_json["computations"].keys())[0]
     comp_dict = program_json["computations"][comp_name]
     comp_schedule_dict = schedule_json[comp_name]
     nb_iterators = len(comp_dict["iterators"])

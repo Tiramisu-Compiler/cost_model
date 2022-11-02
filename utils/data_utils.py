@@ -27,7 +27,7 @@ class LoopsDepthException(Exception):
 
 global_dioph_sols_dict = dict()
 MAX_MATRICES = 5
-
+MAX_TAGS = 8
 
 def get_tree_footprint(tree):
     footprint = "<L" + str(int(tree["loop_index"])) + ">"
@@ -103,6 +103,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     comps_indices_dict = dict()
     comps_placeholders_indices_dict = dict()
 
+    # print(program_dict["filename"])
     program_json = program_dict["program_annotation"]
     computations_dict = program_json["computations"]
     ordered_comp_list = sorted(
@@ -150,7 +151,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
 
         iterators_repr.append(c_code + "-TransformationMatrixStart")
         # MAX_MATRICES is the max number of matrices
-        iterators_repr.extend(["M"] * (((max_depth + 1) ** 2) * MAX_MATRICES - 2))
+        iterators_repr.extend(["M"] * (MAX_TAGS * MAX_MATRICES - 2))
         iterators_repr.append(c_code + "-TransformationMatrixEnd")
 
         comp_repr_template.extend(iterators_repr)
@@ -260,6 +261,8 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     tree_annotation = copy.deepcopy(orig_tree_structure)
     prog_tree = update_tree_atributes(tree_annotation, train_device=train_device)
 
+    # print("comps_repr_templates_list=",comps_repr_templates_list)
+    # print("loops_repr_templates_list=",loops_repr_templates_list)
     return (
         prog_tree,
         comps_repr_templates_list,
@@ -350,19 +353,20 @@ def get_schedule_representation(
         ]
         mat_end = comps_placeholders_indices_dict[c_code + "-TransformationMatrixEnd"]
         nb_mat_elements = mat_end[1] - mat_start[1] + 1
-        max_depth = int(np.sqrt(nb_mat_elements / MAX_MATRICES)) - 1
-        padded_matrix = get_padded_transformation_matrix(
+        max_depth = 5 # Hard-coded
+        # print("mat_start=",mat_start)
+        # print("mat_start[1]",mat_start[1])
+        # print("mat_end=",mat_end)
+        padded_matrix, padded_tags = get_padded_transformation_matrix(
             program_json, schedule_json, comp_name, max_depth
         )
-        assert len(padded_matrix.flatten().tolist()) == nb_mat_elements
+        # print("len(padded_tags.flatten().tolist()) , nb_mat_elements = ",len(padded_tags.flatten().tolist()), nb_mat_elements)
+        assert len(padded_tags.flatten().tolist()) == nb_mat_elements
 
         # print("padded_matrix.flatten().tolist()=",padded_matrix.flatten().tolist())
-        # print("mat_start[0]",mat_start[0])
-        # print("mat_start[1]",mat_start[1])
-        # print("mat_end[1] + 1",mat_end[1] + 1)
         comps_repr[mat_start[0]][
             mat_start[1] : mat_end[1] + 1
-        ] = padded_matrix.flatten().tolist()
+        ] = padded_tags.flatten().tolist()
 
         # print("padded_matrix[0,:].reshape(max_depth + 1,max_depth + 1)=",padded_matrix[0,:].reshape(max_depth + 1,max_depth + 1))
         padded_tranf_mat_per_comp[comp_name] = padded_matrix[0, :].reshape(
@@ -501,13 +505,15 @@ def get_padded_transformation_matrix(
 ):
     # print(program_json["computations"],schedule_json[comp_name])
 
-    #comp_name = list(program_json["computations"].keys())[0]
+    comp_name = list(program_json["computations"].keys())[0]
     comp_dict = program_json["computations"][comp_name]
     comp_schedule_dict = schedule_json[comp_name]
     nb_iterators = len(comp_dict["iterators"])
     loop_nest = comp_dict["iterators"][:]
     identity = np.zeros((nb_iterators, nb_iterators), int)
+    identity_tags = np.zeros((1,MAX_TAGS), dtype=np.int32)
     np.fill_diagonal(identity, 1)
+    tag_factors = []
     if "transformation_matrices" in comp_schedule_dict:
         # torch.concat( list(X.view(-1,3,3)), dim=1)
         if comp_schedule_dict["transformation_matrices"] != []:
@@ -533,12 +539,54 @@ def get_padded_transformation_matrix(
                 mode="constant",
                 constant_values=0,
             )
+            
             final_mat_factors = [final_mat.reshape(1, -1)]
+            tag_factors = []
             for matrix in comp_schedule_dict["transformation_matrices"][::-1]:
                 assert np.sqrt(len(matrix)) == nb_iterators
                 transformation_matrix = np.array(list(map(int, matrix))).reshape(
                     nb_iterators, nb_iterators
                 )
+                tags_vector = identity_tags.copy()
+                # print("transformation_matrix=",transformation_matrix)
+                # print("transformation_matrix.sum()=",transformation_matrix.sum())
+                residual = np.abs(identity - transformation_matrix)
+                mask = residual.sum(axis=1) > 0
+                if residual.sum() == 0 and nb_iterators == transformation_matrix.sum():
+                    continue
+                elif residual.sum() != 0 and nb_iterators == transformation_matrix.sum():
+                    tags_vector[0][0] = 1
+                    dims = np.arange((nb_iterators),dtype=int)[mask]
+                    assert dims.shape[0] == 2
+                    first_iter_index, second_iter_index=dims
+                    tags_vector[0][1], tags_vector[0][2] = first_iter_index, second_iter_index
+                
+                    # print(f"Interchange between {first_iter_index} and {second_iter_index}")
+                elif nb_iterators - 2 == transformation_matrix.sum():  
+                    tags_vector[0][0] = 2           
+                    dims = np.arange((nb_iterators),dtype=int)[mask]
+                    assert dims.shape[0] == 1
+                    index=dims[0]
+                    tags_vector[0][3] = index
+                    # print(f"Reversal of loop {index}")
+                else:
+                    tags_vector[0][0] = 3
+                    dims = np.arange((nb_iterators),dtype=int)[mask]
+                    assert dims.shape[0] == 2
+                    first_iter_index, second_iter_index=dims
+                    tags_vector[0][4], tags_vector[0][5] = first_iter_index, second_iter_index
+
+                    first_factor = transformation_matrix[first_iter_index, first_iter_index]
+                    second_factor = transformation_matrix[first_iter_index, second_iter_index]
+                    a = transformation_matrix[second_iter_index, first_iter_index]
+                    b = transformation_matrix[second_iter_index, second_iter_index]
+
+                    assert (a,b) == linear_diophantine_default(first_factor, second_factor)
+                    tags_vector[0][6], tags_vector[0][7] = first_factor, second_factor
+                    
+                    # print(f"Skewing between {first_iter_index} and {second_iter_index} and with params {first_factor} and {second_factor}")
+                # print("""nb_iterators=""",nb_iterators, end=" ")
+                # print("""transformation_matrix=""",transformation_matrix.sum())
                 if (transformation_matrix == identity).all():
                     continue
                 # print(transformation_matrix)
@@ -558,6 +606,8 @@ def get_padded_transformation_matrix(
                     constant_values=0,
                 )
                 final_mat_factors.append(transformation_matrix.reshape(1, -1))
+                tag_factors.append(tags_vector)
+                # print("tags_vector=",tags_vector)
             if len(final_mat_factors) > MAX_MATRICES:
                 # print("length exceeded = ", len(final_mat_factors))
                 raise NbMatricesException
@@ -567,6 +617,12 @@ def get_padded_transformation_matrix(
                 if final_mat_factors
                 else identity.copy()
             )
+            final_tags = (
+                np.concatenate(tag_factors, axis=0)
+                if tag_factors
+                else identity_tags.copy()
+            )
+            # print("final_tags=",final_tags)
         else:
             final_mat = identity.copy()
             final_transformation_matrix = final_mat
@@ -581,6 +637,7 @@ def get_padded_transformation_matrix(
                 mode="constant",
                 constant_values=0,
             ).reshape(1, -1)
+            final_tags = identity_tags.copy()
 
         comparison_matrix = identity.copy()
         for mat in comp_schedule_dict["transformation_matrices"][::-1]:
@@ -590,6 +647,13 @@ def get_padded_transformation_matrix(
         # print(comparison_matrix,final_transformation_matrix)
         assert (comparison_matrix == final_transformation_matrix).all()
     else:
+        
+        ## There is a bug in here
+        ## I am adding matrices even though they are empty (aka. identity)
+        ## TODO
+        ## TODO
+        
+        
         interchange_matrix = identity.copy()
         if comp_schedule_dict["interchange_dims"]:
             first_iter_index = loop_nest.index(
@@ -606,6 +670,10 @@ def get_padded_transformation_matrix(
                 loop_nest[second_iter_index],
                 loop_nest[first_iter_index],
             )
+            tags_vector = identity_tags.copy()
+            tags_vector[0][0] = 1
+            tags_vector[0][1], tags_vector[0][2] = first_iter_index, second_iter_index
+            tag_factors.append(tags_vector)
 
         skewing_matrix = identity.copy()
         if comp_schedule_dict["skewing"]:
@@ -627,10 +695,17 @@ def get_padded_transformation_matrix(
             skewing_matrix[second_iter_index, first_iter_index] = a
             skewing_matrix[second_iter_index, second_iter_index] = b
 
+            tags_vector = identity_tags.copy()
+            tags_vector[0][0] = 3
+            tags_vector[0][4], tags_vector[0][5] = first_iter_index, second_iter_index
+            tags_vector[0][6], tags_vector[0][7] = first_factor, second_factor
+            tag_factors.append(tags_vector)
+
         final_mat = skewing_matrix @ interchange_matrix
 
         final_mat_factors = []
         for matrix in [final_mat, skewing_matrix, interchange_matrix]:
+            
             matrix = np.c_[np.ones(matrix.shape[0]), matrix]
             matrix = np.r_[[np.ones(matrix.shape[1])], matrix]
             matrix = np.pad(
@@ -648,6 +723,13 @@ def get_padded_transformation_matrix(
             if final_mat_factors
             else identity.copy()
         )
+        
+        final_tags = (
+            np.concatenate(tag_factors, axis=0)
+            if tag_factors
+            else identity_tags.copy()
+        )
+        
 
     padded_mat = final_mat
 
@@ -658,6 +740,10 @@ def get_padded_transformation_matrix(
             (0, MAX_MATRICES - final_mat.shape[0]),
             (0, (max_depth + 1) ** 2 - final_mat.shape[1]),
         ]
+        padding_ranges_tags = [
+            (0, MAX_MATRICES - final_tags.shape[0]),
+            (0, MAX_TAGS - final_tags.shape[1]),
+        ]
         try:
             padded_mat = np.pad(
                 final_mat,
@@ -665,14 +751,20 @@ def get_padded_transformation_matrix(
                 mode="constant",
                 constant_values=0,
             )
+            padded_tags = np.pad(
+                final_tags,
+                padding_ranges_tags,
+                mode="constant",
+                constant_values=0,
+            )
+            # print("padded_tags=",padded_tags)
 
         except ValueError:
             print("ValueError")
             print(final_mat.shape)
             print(padding_ranges)
     # print("padded_mat",padded_mat.reshape(6,6))
-    return padded_mat
-
+    return padded_mat,padded_tags
 
 def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footprint):
     schedule_json = program_dict["schedules_list"][schedule_index]

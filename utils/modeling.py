@@ -8,18 +8,18 @@ def seperate_vector(
 ) -> torch.Tensor:
     batch_size, _ = X.shape
     first_part = X[:, :33]
-    second_part = X[:, 33 : 33 + 36 * num_matrices]
-    third_part = X[:, 33 + 36 * num_matrices :]
+    second_part = X[:, 33 : 33 + 8 * num_matrices]
+    third_part = X[:, 33 + 8 * num_matrices :]
     vectors = []
     for i in range(num_matrices):
-        vector = second_part[:, 36 * i : 36 * (i + 1)].reshape(batch_size, 1, -1)
+        vector = second_part[:, 8 * i : 8 * (i + 1)].reshape(batch_size, 1, -1)
         vectors.append(vector)
 
     if pad:
         for i in range(pad_amount):
             vector = torch.zeros_like(vector)
             vectors.append(vector)
-    return (first_part, vectors[0], torch.cat(vectors[1:], dim=1), third_part)
+    return (first_part, vectors[0], torch.cat(vectors, dim=1), third_part)
 
 
 class Model_Recursive_LSTM_v2(nn.Module):
@@ -77,8 +77,8 @@ class Model_Recursive_LSTM_v2(nn.Module):
             self.concat_dropouts.append(nn.Dropout(drops[i]))
         self.predict = nn.Linear(regression_layer_sizes[-1], output_size, bias=True)
         self.encode_vectors = nn.Linear(
-            transformation_matrix_dimension**2,
-            transformation_matrix_dimension**2,
+            8,
+            8,
             bias=True,
         )
         nn.init.xavier_uniform_(self.predict.weight)
@@ -97,7 +97,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
             comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         self.comps_embed = nn.LSTM(
-            transformation_matrix_dimension**2,
+            8,
             lstm_embedding_size,
             batch_first=True,
             bidirectional=bidirectional,
@@ -154,7 +154,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         x = torch.cat(
             (
                 first_part,
-                final_matrix.reshape(batch_size * num_comps, -1),
+                # final_matrix.reshape(batch_size * num_comps, -1),
                 prog_embedding,
                 third_part,
             ),

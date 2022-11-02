@@ -631,6 +631,8 @@ def get_padded_transformation_matrix(
 
         final_mat_factors = []
         for matrix in [final_mat, skewing_matrix, interchange_matrix]:
+            if (matrix == identity).all():
+                continue
             matrix = np.c_[np.ones(matrix.shape[0]), matrix]
             matrix = np.r_[[np.ones(matrix.shape[1])], matrix]
             matrix = np.pad(

@@ -31,7 +31,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         output_size=1,
         lstm_embedding_size=100,
         transformation_matrix_dimension=6,
-        loops_tensor_size=20,
+        loops_tensor_size=8,
         train_device="cpu",
         num_layers=1,
         bidirectional=True,
@@ -137,6 +137,8 @@ class Model_Recursive_LSTM_v2(nn.Module):
 
     def forward(self, tree_tensors):
         tree, comps_tensor, loops_tensor = tree_tensors
+        
+        # print(loops_tensor.shape)
         
         # computation embbedding layer
         x = comps_tensor.to(self.train_device)

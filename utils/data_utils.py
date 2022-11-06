@@ -219,16 +219,16 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
                 l_code + "UnrollFactor",
             ]
         )
-        loop_repr_template.extend(
-            [l_code + "TransfMatRowStart"]
-            + ["M"] * ((max_depth + 1) - 2)
-            + [l_code + "TransfMatRowEnd"]
-        )
-        loop_repr_template.extend(
-            [l_code + "TransfMatColStart"]
-            + ["M"] * (max_depth - 2 + 1)
-            + [l_code + "TransfMatColEnd"]
-        )
+        # loop_repr_template.extend(
+        #     [l_code + "TransfMatRowStart"]
+        #     + ["M"] * ((max_depth + 1) - 2)
+        #     + [l_code + "TransfMatRowEnd"]
+        # )
+        # loop_repr_template.extend(
+        #     [l_code + "TransfMatColStart"]
+        #     + ["M"] * (max_depth - 2 + 1)
+        #     + [l_code + "TransfMatColEnd"]
+        # )
 
         loops_repr_templates_list.append(loop_repr_template)
         loops_indices_dict[loop_name] = loop_index
@@ -472,27 +472,27 @@ def get_schedule_representation(
         p_index = loops_placeholders_indices_dict[l_code + "Fused"]
         loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name]["fused"]
 
-        row_start = loops_placeholders_indices_dict[l_code + "TransfMatRowStart"]
-        row_end = loops_placeholders_indices_dict[l_code + "TransfMatRowEnd"]
-        nb_row_elements = row_end[1] - row_start[1] + 1
-        assert (
-            len(loop_schedules_dict[loop_name]["TransformationMatrixRow"])
-            == nb_row_elements
-        )
-        loops_repr[row_start[0]][row_start[1] : row_end[1] + 1] = loop_schedules_dict[
-            loop_name
-        ]["TransformationMatrixRow"]
+        # row_start = loops_placeholders_indices_dict[l_code + "TransfMatRowStart"]
+        # row_end = loops_placeholders_indices_dict[l_code + "TransfMatRowEnd"]
+        # nb_row_elements = row_end[1] - row_start[1] + 1
+        # assert (
+        #     len(loop_schedules_dict[loop_name]["TransformationMatrixRow"])
+        #     == nb_row_elements
+        # )
+        # loops_repr[row_start[0]][row_start[1] : row_end[1] + 1] = loop_schedules_dict[
+        #     loop_name
+        # ]["TransformationMatrixRow"]
 
-        col_start = loops_placeholders_indices_dict[l_code + "TransfMatColStart"]
-        col_end = loops_placeholders_indices_dict[l_code + "TransfMatColEnd"]
-        nb_col_elements = col_end[1] - col_start[1] + 1
-        assert (
-            len(loop_schedules_dict[loop_name]["TransformationMatrixCol"])
-            == nb_col_elements
-        )
-        loops_repr[col_start[0]][col_start[1] : col_end[1] + 1] = loop_schedules_dict[
-            loop_name
-        ]["TransformationMatrixCol"]
+        # col_start = loops_placeholders_indices_dict[l_code + "TransfMatColStart"]
+        # col_end = loops_placeholders_indices_dict[l_code + "TransfMatColEnd"]
+        # nb_col_elements = col_end[1] - col_start[1] + 1
+        # assert (
+        #     len(loop_schedules_dict[loop_name]["TransformationMatrixCol"])
+        #     == nb_col_elements
+        # )
+        # loops_repr[col_start[0]][col_start[1] : col_end[1] + 1] = loop_schedules_dict[
+        #     loop_name
+        # ]["TransformationMatrixCol"]
 
     loops_tensor = torch.unsqueeze(torch.FloatTensor(loops_repr), 0)
     computations_tensor = torch.unsqueeze(torch.FloatTensor(comps_repr), 0)

@@ -12,90 +12,30 @@ from utils.config import *
 from scipy.stats import spearmanr
 from sklearn.metrics import ndcg_score
 
-
-class NbMatricesException(Exception):
+# An exception to limit the maximum number of allowed transformations 
+class NbTranformationException(Exception):
     pass
 
+class RandomMatrix(Exception):
+    pass
 
+# An exception to limit the maximum number of read-write accesses. 
 class NbAccessException(Exception):
     pass
 
-
+# An exception to limit the maximum number of nested loops. Currently set to 5.
 class LoopsDepthException(Exception):
     pass
 
+# Maximum sequence of transformations (reversal, interchange and skewing) allowed. Currently set to 5 
+MAX_NUM_TRANSFORMATIONS = 4
 
-global_dioph_sols_dict = dict()
-MAX_MATRICES = 5
+# Maximum size of the tags vector representing each transformation
+MAX_TAGS = 8
 
-
-def get_tree_footprint(tree):
-    footprint = "<L" + str(int(tree["loop_index"])) + ">"
-    if tree["has_comps"]:
-        footprint += "["
-        for idx in tree["computations_indices"]:
-            footprint += "C" + str(int(idx))
-        footprint += "]"
-    for child in tree["child_list"]:
-        footprint += get_tree_footprint(child)
-    footprint += "</L" + str(int(tree["loop_index"])) + ">"
-    return footprint
-
-
-def load_data(
-    train_val_dataset_file,
-    split_ratio=None,
-    max_batch_size=2048,
-    drop_sched_func=None,
-    drop_prog_func=None,
-    default_eval=None,
-    speedups_clip_func=None,
-    store_device="cpu",
-    train_device="cpu",
-):
-    print("loading batches from: " + train_val_dataset_file)
-    dataset = Dataset(
-        train_val_dataset_file,
-        max_batch_size,
-        drop_sched_func,
-        drop_prog_func,
-        default_eval,
-        speedups_clip_func,
-        store_device=store_device,
-        train_device=train_device,
-    )
-    if split_ratio == None:
-        split_ratio = 0.2
-    if split_ratio > 1:
-        validation_size = split_ratio
-    else:
-        validation_size = int(split_ratio * len(dataset))
-    indices = list(range(len(dataset)))
-
-    val_batches_indices, train_batches_indices = (
-        indices[:validation_size],
-        indices[validation_size:],
-    )
-    val_batches_list = []
-    train_batches_list = []
-    for i in val_batches_indices:
-        val_batches_list.append(dataset[i])
-    for i in train_batches_indices:
-        train_batches_list.append(dataset[i])
-    print("Data loaded")
-    print(
-        "Sizes: " + str((len(val_batches_list), len(train_batches_list))) + " batches"
-    )
-    return (
-        dataset,
-        val_batches_list,
-        val_batches_indices,
-        train_batches_list,
-        train_batches_indices,
-    )
-
-
+# Creates a template for the input representation
 def get_representation_template(program_dict, max_depth, train_device="cpu"):
+    # Set the max and min number of accesses allowed 
     max_accesses = 15
     min_accesses = 1
 
@@ -103,7 +43,10 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     comps_indices_dict = dict()
     comps_placeholders_indices_dict = dict()
 
+    # Get the program JSON represenation
     program_json = program_dict["program_annotation"]
+    
+    # Get the computations (program statements) dictionary and order them according to the absolute_order attribute
     computations_dict = program_json["computations"]
     ordered_comp_list = sorted(
         list(computations_dict.keys()),
@@ -111,11 +54,15 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     )
 
     for comp_index, comp_name in enumerate(ordered_comp_list):
+        
         comp_dict = computations_dict[comp_name]
+        
         if len(comp_dict["accesses"]) > max_accesses:
             raise NbAccessException
+        
         if len(comp_dict["accesses"]) < min_accesses:
             raise NbAccessException
+        
         if len(comp_dict["iterators"]) > max_depth:
             raise LoopsDepthException
 
@@ -124,14 +71,19 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         comp_repr_template.append(+comp_dict["comp_is_reduction"])
 
         iterators_repr = []
+        # Add a representation of each loop of this computation
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
+            
             iterator_dict = program_json["iterators"][iterator_name]
+            # Add the bounds of the loop
             iterators_repr.extend(
                 [iterator_dict["lower_bound"], iterator_dict["upper_bound"]]
             )
-
+            # Create a unique code for each loop
             c_code = "C" + str(comp_index)
             l_code = c_code + "-L" + str(iter_i)
+            
+            # Add a placeholder for transformations applied to this loop
             iterators_repr.extend(
                 [
                     l_code + "Parallelized",
@@ -140,21 +92,27 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
                     l_code + "Fused",
                 ]
             )
-
+        
         iterator_repr_size = int(len(iterators_repr) / len(comp_dict["iterators"]))
+        
+        # Add padding incase the number of loops is lower than the max
         iterators_repr.extend(
             [0] * iterator_repr_size * (max_depth - len(comp_dict["iterators"]))
         )
-
+        
+        # Add two tags for whether unrolling was applied and the unrolling factor
         iterators_repr.extend([c_code + "-Unrolled", c_code + "-UnrollFactor"])
 
-        iterators_repr.append(c_code + "-TransformationMatrixStart")
-        # MAX_MATRICES is the max number of matrices
-        iterators_repr.extend(["M"] * (((max_depth + 1) ** 2) * MAX_MATRICES - 2))
-        iterators_repr.append(c_code + "-TransformationMatrixEnd")
+        # Add a placeholder for the other transformations to be applied (skewing, reversal and interchage)
+        # We use MAX_NUM_TRANSFORMATIONS instead of MAX_NUM_TRANSFORMATIONS to include the matrix that represents the whole sequence
+        iterators_repr.append(c_code + "-TransformationTagsStart")
+        iterators_repr.extend(["M"] * (MAX_TAGS * MAX_NUM_TRANSFORMATIONS - 2))
+        iterators_repr.append(c_code + "-TransformationTagsEnd")
 
+        # Add the loop representation to the computation vector 
         comp_repr_template.extend(iterators_repr)
-
+        
+        # Pad the write access matrix and add it to the representation
         padded_write_matrix = pad_access_matrix(
             isl_to_write_matrix(comp_dict["write_access_relation"]), max_depth
         )
@@ -164,6 +122,8 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
 
         comp_repr_template.extend(write_access_repr)
 
+        # Pad the read access matrix and add it to the representation
+        # Todo add details about the read accesses 
         read_accesses_repr = []
         for read_access_dict in comp_dict["accesses"]:
             read_access_matrix = pad_access_matrix(
@@ -176,38 +136,49 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
             )
             read_accesses_repr.extend(read_access_repr)
 
+        
         access_repr_len = (max_depth + 1) * (max_depth + 2) + 1 + 1
+        
         read_accesses_repr.extend(
             [0] * access_repr_len * (max_accesses - len(comp_dict["accesses"]))
         )
 
         comp_repr_template.extend(read_accesses_repr)
-
+        
+        
+        # Add a historgram of operations for this computation 
         comp_repr_template.append(comp_dict["number_of_additions"])
         comp_repr_template.append(comp_dict["number_of_subtraction"])
         comp_repr_template.append(comp_dict["number_of_multiplication"])
         comp_repr_template.append(comp_dict["number_of_division"])
 
         comps_repr_templates_list.append(comp_repr_template)
+        
+        # Create a mapping between the features and their position in the representation
         comps_indices_dict[comp_name] = comp_index
         for j, element in enumerate(comp_repr_template):
             if isinstance(element, str):
                 comps_placeholders_indices_dict[element] = (comp_index, j)
-
+            
+            
+    # Create a representation of the loops independantly from the computations
     loops_repr_templates_list = []
     loops_indices_dict = dict()
     loops_placeholders_indices_dict = dict()
 
     for loop_index, loop_name in enumerate(program_json["iterators"]):
+        # Create a unique code for each loop
         loop_repr_template = []
         l_code = "L" + loop_name
-
+        
+        # Add the bounds of the loop
         loop_repr_template.extend(
             [
                 program_json["iterators"][loop_name]["lower_bound"],
                 program_json["iterators"][loop_name]["upper_bound"],
             ]
         )
+        # Add a placeholder for transformations applied to this loop
         loop_repr_template.extend(
             [
                 l_code + "Parallelized",
@@ -218,25 +189,46 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
                 l_code + "UnrollFactor",
             ]
         )
-        loop_repr_template.extend(
-            [l_code + "TransfMatRowStart"]
-            + ["M"] * ((max_depth + 1) - 2)
-            + [l_code + "TransfMatRowEnd"]
-        )
-        loop_repr_template.extend(
-            [l_code + "TransfMatColStart"]
-            + ["M"] * (max_depth - 2 + 1)
-            + [l_code + "TransfMatColEnd"]
-        )
-
+        
+        # Create a mapping between the features and their position in the representation
         loops_repr_templates_list.append(loop_repr_template)
         loops_indices_dict[loop_name] = loop_index
 
         for j, element in enumerate(loop_repr_template):
             if isinstance(element, str):
                 loops_placeholders_indices_dict[element] = (loop_index, j)
+    
+    # Get the original version of the program 
+    no_sched_json = program_dict["schedules_list"][0]
+    
+    # Make sure no fusion was applied on this version and get the original tree structure 
+    if (not ("fusions" not in no_sched_json or no_sched_json["fusions"] == None)):
+        
+        with open('program_dict.txt', 'w') as f:
+            f.write(str(program_dict))
+            f.write("program_dict")
+            f.write(str(no_sched_json))
+#         print(program_dict)
+    assert "fusions" not in no_sched_json or no_sched_json["fusions"] == None
+    
+    orig_tree_structure = no_sched_json["tree_structure"]
+    tree_annotation = copy.deepcopy(orig_tree_structure)
+    
+    # TODO what is there to update
+    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device=train_device)
+    
+    return (
+        prog_tree,
+        comps_repr_templates_list,
+        loops_repr_templates_list,
+        comps_placeholders_indices_dict,
+        loops_placeholders_indices_dict,
+    )
 
-    def update_tree_atributes(node, train_device="cpu"):
+
+
+# TODO add description
+def update_tree_atributes(node, loops_indices_dict, comps_indices_dict, train_device="cpu"):
         node["loop_index"] = torch.tensor(loops_indices_dict[node["loop_name"]]).to(
             train_device
         )
@@ -251,24 +243,12 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         else:
             node["has_comps"] = False
         for child_node in node["child_list"]:
-            update_tree_atributes(child_node, train_device=train_device)
+            update_tree_atributes(child_node, loops_indices_dict, comps_indices_dict, train_device=train_device)
         return node
 
-    no_sched_json = program_dict["schedules_list"][0]
-    assert "fusions" not in no_sched_json or no_sched_json["fusions"] == None
-    orig_tree_structure = no_sched_json["tree_structure"]
-    tree_annotation = copy.deepcopy(orig_tree_structure)
-    prog_tree = update_tree_atributes(tree_annotation, train_device=train_device)
-
-    return (
-        prog_tree,
-        comps_repr_templates_list,
-        loops_repr_templates_list,
-        comps_placeholders_indices_dict,
-        loops_placeholders_indices_dict,
-    )
-
-
+    
+    
+# Fill the representation template with the corresponsing schedule features 
 def get_schedule_representation(
     program_json,
     schedule_json,
@@ -278,40 +258,47 @@ def get_schedule_representation(
     loops_placeholders_indices_dict,
     max_depth,
 ):
-
+    
+    # Create a copy of the templates to avoid modifying the values for other schedules
     comps_repr = copy.deepcopy(comps_repr_templates_list)
     loops_repr = copy.deepcopy(loops_repr_templates_list)
 
+    
     computations_dict = program_json["computations"]
     ordered_comp_list = sorted(
         list(computations_dict.keys()),
         key=lambda x: computations_dict[x]["absolute_order"],
     )
-
-    padded_tranf_mat_per_comp = dict()
-
+    
+    
     for comp_index, comp_name in enumerate(ordered_comp_list):
         comp_dict = program_json["computations"][comp_name]
         comp_schedule_dict = schedule_json[comp_name]
-        c_code = "C" + str(comp_index)
-
+    
         fused_levels = []
+        
+        # If fusion was applied, save which two loops were fused together
         if "fusions" in schedule_json and schedule_json["fusions"]:
             for fusion in schedule_json["fusions"]:
 
                 if comp_name in fusion:
                     fused_levels.append(fusion[2])
 
+        
+        c_code = "C" + str(comp_index)
+        # Loop representation for this computation
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
 
             l_code = c_code + "-L" + str(iter_i)
-
+            
+            # Check whether parallelization was applied and put the tag in its corresponding position in the computation representation
             parallelized = 0
             if iterator_name == comp_schedule_dict["parallelized_dim"]:
                 parallelized = 1
             p_index = comps_placeholders_indices_dict[l_code + "Parallelized"]
             comps_repr[p_index[0]][p_index[1]] = parallelized
-
+            
+            # Check whether tiling was applied and put the tags in their corresponding position in the computation representation
             tiled = 0
             tile_factor = 0
             if comp_schedule_dict["tiling"] and (
@@ -329,51 +316,51 @@ def get_schedule_representation(
             p_index = comps_placeholders_indices_dict[l_code + "TileFactor"]
             comps_repr[p_index[0]][p_index[1]] = tile_factor
 
+            # Check whether fusion was applied and put the tag in its corresponding position in the computation representation
             fused = 0
             if iter_i in fused_levels:
                 fused = 1
             p_index = comps_placeholders_indices_dict[l_code + "Fused"]
             comps_repr[p_index[0]][p_index[1]] = fused
-
+        
+        # Check whether unrolling was applied and put the tags in their corresponding position in the computation representation
         unrolled = 0
         unroll_factor = 0
         if comp_schedule_dict["unrolling_factor"]:
             unrolled = 1
             unroll_factor = int(comp_schedule_dict["unrolling_factor"])
+            
         p_index = comps_placeholders_indices_dict[c_code + "-Unrolled"]
         comps_repr[p_index[0]][p_index[1]] = unrolled
+        
         p_index = comps_placeholders_indices_dict[c_code + "-UnrollFactor"]
         comps_repr[p_index[0]][p_index[1]] = unroll_factor
-
-        mat_start = comps_placeholders_indices_dict[
-            c_code + "-TransformationMatrixStart"
-        ]
-        mat_end = comps_placeholders_indices_dict[c_code + "-TransformationMatrixEnd"]
-        nb_mat_elements = mat_end[1] - mat_start[1] + 1
-        max_depth = int(np.sqrt(nb_mat_elements / MAX_MATRICES)) - 1
-        padded_matrix = get_padded_transformation_matrix(
+        
+        # Check which transformations (interchange, reversal and skweing) were applied and add the padded vector representation to their corresponding position
+        padded_tags = get_padded_transformation_tags(
             program_json, schedule_json, comp_name, max_depth
         )
-        assert len(padded_matrix.flatten().tolist()) == nb_mat_elements
+        
+        tags_start = comps_placeholders_indices_dict[ c_code + "-TransformationTagsStart" ]
+        
+        tags_end = comps_placeholders_indices_dict[c_code + "-TransformationTagsEnd"]
+        
+        nb_tags_elements = tags_end[1] - tags_start[1] + 1
+        
+        assert len(padded_tags) == nb_tags_elements
 
-        # print("padded_matrix.flatten().tolist()=",padded_matrix.flatten().tolist())
-        # print("mat_start[0]",mat_start[0])
-        # print("mat_start[1]",mat_start[1])
-        # print("mat_end[1] + 1",mat_end[1] + 1)
-        comps_repr[mat_start[0]][
-            mat_start[1] : mat_end[1] + 1
-        ] = padded_matrix.flatten().tolist()
+        
+        comps_repr[tags_start[0]][
+            tags_start[1] : tags_end[1] + 1
+        ] = padded_tags
 
-        # print("padded_matrix[0,:].reshape(max_depth + 1,max_depth + 1)=",padded_matrix[0,:].reshape(max_depth + 1,max_depth + 1))
-        padded_tranf_mat_per_comp[comp_name] = padded_matrix[0, :].reshape(
-            max_depth + 1, max_depth + 1
-        )
-
+        
+        
+    # Fill the loop representation
+    # Initialization
     loop_schedules_dict = dict()
     for loop_name in program_json["iterators"]:
         loop_schedules_dict[loop_name] = dict()
-        loop_schedules_dict[loop_name]["TransformationMatrixCol"] = []
-        loop_schedules_dict[loop_name]["TransformationMatrixRow"] = []
         loop_schedules_dict[loop_name]["tiled"] = 0
         loop_schedules_dict[loop_name]["tile_factor"] = 0
         loop_schedules_dict[loop_name]["unrolled"] = 0
@@ -383,66 +370,52 @@ def get_schedule_representation(
 
     for comp_index, comp_name in enumerate(ordered_comp_list):
         comp_schedule_dict = schedule_json[comp_name]
+        
+        # Check whether tiling was applied 
         if comp_schedule_dict["tiling"]:
             for tiled_loop_index, tiled_loop in enumerate(
                 comp_schedule_dict["tiling"]["tiling_dims"]
             ):
                 loop_schedules_dict[tiled_loop]["tiled"] = 1
-                assert loop_schedules_dict[tiled_loop][
-                    "tile_factor"
-                ] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
+                assert (loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
-                )
+                ))
                 loop_schedules_dict[tiled_loop]["tile_factor"] = int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
                 )
+                
+        # Check whether unrolling was applied 
         if comp_schedule_dict["unrolling_factor"]:
-            comp_innermost_loop = computations_dict[comp_name]["iterators"][-1]
+            comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
+#             comp_innermost_loop = computations_dict[comp_name]["iterators"][-1]
             loop_schedules_dict[comp_innermost_loop]["unrolled"] = 1
-            assert loop_schedules_dict[comp_innermost_loop][
-                "unroll_factor"
-            ] == 0 or loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(
-                comp_schedule_dict["unrolling_factor"]
-            )
-            loop_schedules_dict[comp_innermost_loop]["unroll_factor"] = int(
-                comp_schedule_dict["unrolling_factor"]
-            )
+            
+            if(loop_schedules_dict[comp_innermost_loop]["unroll_factor"] != 0 and                                                                                         loop_schedules_dict[comp_innermost_loop]["unroll_factor"] != int(comp_schedule_dict["unrolling_factor"])):
+                
+                print(loop_schedules_dict[comp_innermost_loop]["unroll_factor"])
+                print( int(comp_schedule_dict["unrolling_factor"]))
+                print(schedule_json)
+                print(program_json)
+                
+            assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or                                                                                           loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
+            
+            loop_schedules_dict[comp_innermost_loop]["unroll_factor"] = int(comp_schedule_dict["unrolling_factor"])
+            
+        # Check whether parallelization was applied 
         if comp_schedule_dict["parallelized_dim"]:
-            loop_schedules_dict[comp_schedule_dict["parallelized_dim"]][
-                "parallelized"
-            ] = 1
+            loop_schedules_dict[comp_schedule_dict["parallelized_dim"]]["parallelized"] = 1
 
-        assert padded_tranf_mat_per_comp[comp_name].shape == (
-            (max_depth + 1),
-            (max_depth + 1),
-        )
-        for iter_i, loop_name in enumerate(computations_dict[comp_name]["iterators"]):
-            if len(loop_schedules_dict[loop_name]["TransformationMatrixCol"]) > 0:
-                assert (
-                    loop_schedules_dict[loop_name]["TransformationMatrixCol"]
-                    == padded_tranf_mat_per_comp[comp_name][:, iter_i + 1]
-                ).all()
-            else:
-                loop_schedules_dict[loop_name][
-                    "TransformationMatrixCol"
-                ] = padded_tranf_mat_per_comp[comp_name][:, iter_i + 1]
-            if len(loop_schedules_dict[loop_name]["TransformationMatrixRow"]) > 0:
-                assert (
-                    loop_schedules_dict[loop_name]["TransformationMatrixRow"]
-                    == padded_tranf_mat_per_comp[comp_name][iter_i + 1, :]
-                ).all()
-            else:
-                loop_schedules_dict[loop_name][
-                    "TransformationMatrixRow"
-                ] = padded_tranf_mat_per_comp[comp_name][iter_i + 1, :]
-
+        
+    # Check whether parallelization was applied 
     if "fusions" in schedule_json and schedule_json["fusions"]:
         for fusion in schedule_json["fusions"]:
             fused_loop1 = computations_dict[fusion[0]]["iterators"][fusion[2]]
             fused_loop2 = computations_dict[fusion[1]]["iterators"][fusion[2]]
             loop_schedules_dict[fused_loop1]["fused"] = 1
             loop_schedules_dict[fused_loop2]["fused"] = 1
-
+            
+    program_iterators = get_comp_iterators_from_tree_struct(schedule_json, comp_name)
+    # Get the index of each feature in the loop representation and replace it with the the information obtained from the schedule
     for loop_name in program_json["iterators"]:
         l_code = "L" + loop_name
 
@@ -467,215 +440,454 @@ def get_schedule_representation(
 
         p_index = loops_placeholders_indices_dict[l_code + "Fused"]
         loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name]["fused"]
+        
+    if (len(program_json["iterators"])>len(program_iterators)):
+        removed_iterators = list(set(program_json["iterators"]) - set(program_iterators))
+        for loop_name in removed_iterators:
+            l_code = "L" + loop_name
 
-        row_start = loops_placeholders_indices_dict[l_code + "TransfMatRowStart"]
-        row_end = loops_placeholders_indices_dict[l_code + "TransfMatRowEnd"]
-        nb_row_elements = row_end[1] - row_start[1] + 1
-        assert (
-            len(loop_schedules_dict[loop_name]["TransformationMatrixRow"])
-            == nb_row_elements
-        )
-        loops_repr[row_start[0]][row_start[1] : row_end[1] + 1] = loop_schedules_dict[
-            loop_name
-        ]["TransformationMatrixRow"]
+            p_index = loops_placeholders_indices_dict[l_code + "Parallelized"]
+            loops_repr[p_index[0]][p_index[1]] = 0
 
-        col_start = loops_placeholders_indices_dict[l_code + "TransfMatColStart"]
-        col_end = loops_placeholders_indices_dict[l_code + "TransfMatColEnd"]
-        nb_col_elements = col_end[1] - col_start[1] + 1
-        assert (
-            len(loop_schedules_dict[loop_name]["TransformationMatrixCol"])
-            == nb_col_elements
-        )
-        loops_repr[col_start[0]][col_start[1] : col_end[1] + 1] = loop_schedules_dict[
-            loop_name
-        ]["TransformationMatrixCol"]
+            p_index = loops_placeholders_indices_dict[l_code + "Tiled"]
+            loops_repr[p_index[0]][p_index[1]] = 0
+            p_index = loops_placeholders_indices_dict[l_code + "TileFactor"]
+            loops_repr[p_index[0]][p_index[1]] = 0
 
+            p_index = loops_placeholders_indices_dict[l_code + "Unrolled"]
+            loops_repr[p_index[0]][p_index[1]] = 0
+            p_index = loops_placeholders_indices_dict[l_code + "UnrollFactor"]
+            loops_repr[p_index[0]][p_index[1]] = 0
+
+            p_index = loops_placeholders_indices_dict[l_code + "Fused"]
+            loops_repr[p_index[0]][p_index[1]] = 0
+
+    
     loops_tensor = torch.unsqueeze(torch.FloatTensor(loops_repr), 0)
     computations_tensor = torch.unsqueeze(torch.FloatTensor(comps_repr), 0)
 
     return computations_tensor, loops_tensor
 
 
-def get_padded_transformation_matrix(
+    
+# A class to contain the training and validation datasets
+# Parameters:
+#     dataset_filename: path to training/val dataset
+#     max_batch_size: maximum batch size
+#     drop_sched_func: function specifying which schedules in the dataset we want to be dropped if any
+#     drop_prog_func: function specifying which programs in the dataset we want to be dropped if any
+#     can_set_default_eval: function spesifying which points in the dataset can be set to default evaluation TODO add section where this is justified
+#     speedups_clip_func: function spesifying which speedups to clip and to what value
+#     store_device: device where to store the dataset
+#     train_device: device where to train the model
+class Dataset:
+    def __init__(
+        self,
+        dataset_filename,
+        max_batch_size,
+        drop_sched_func=None,
+        drop_prog_func=None,
+        can_set_default_eval=None,
+        speedups_clip_func=None,
+        store_device="cpu",
+        train_device="cpu",
+    ):
+        # in case the dataset was stored in the json format
+        if dataset_filename.endswith("json"):
+            # we open the dataset as a normal file
+            with open(dataset_filename, "r") as f:
+                dataset_str = f.read()
+            self.programs_dict = json.loads(dataset_str)
+        # in case the dataset was stored in the pkl format
+        elif dataset_filename.endswith("pkl"):
+            # we un-pickle the file using the pickle library 
+            with open(dataset_filename, "rb") as f:
+                self.programs_dict = pickle.load(f)
+
+        # Structure to contain the batched inputs
+        self.batched_X = []
+        # Structure to contain the batched labels
+        self.batched_Y = []
+        # Structure to contain TODO
+        self.batches_dict = dict()
+        # Maximum number of nested loops in a program
+        self.max_depth = 5
+        # Number of all the dropped schedules
+        self.nb_dropped = 0
+        self.nb_dropped_random_matrix = 0
+        # Number of dropped schedules due to the drop schedule function only
+        self.nb_pruned = 0
+        # List of dropped functions 
+        self.dropped_funcs = []
+        # TODO remove this unused variable
+        self.function_names_map = dict()
+        # Saved data attributes for analysis and expirements TODO maybe remove this
+        self.batched_datapoint_attributes = []
+        # number of loaded datapoints
+        self.nb_datapoints = 0
+        
+        # If no function to drop schedules was specified, define a function that doesn't drop any schedule
+        if drop_sched_func == None:
+
+            def drop_sched_func(x, y):
+                return False
+            
+        # If no function to drop programs was specified, define a function that doesn't drop any program
+        if drop_prog_func == None:
+
+            def drop_prog_func(x, y):
+                return False
+            
+        # If no function to clip the speedup was specified, define a function that doesn't clip the speedup
+        if speedups_clip_func == None:
+
+            def speedups_clip_func(x):
+                return x
+        # If no function to set the default evaluation was specified, define a function that doesn't set the evaluation to a default value for any point
+        if can_set_default_eval == None:
+
+            def can_set_default_eval(x, y):
+                return 0
+        # shuffle the programs of the dataset
+        functions_list = list(self.programs_dict.keys())
+        random.Random(42).shuffle(functions_list)
+        
+        for index, function_name in enumerate(tqdm(functions_list)):
+            # Check whether this function should be dropped
+            if drop_prog_func(self.programs_dict[function_name], function_name):
+                self.nb_dropped += len(
+                    self.programs_dict[function_name]["schedules_list"]
+                )
+                self.dropped_funcs.append(function_name)
+                continue
+            # Get the JSON representation of the program features
+            program_json = self.programs_dict[function_name]["program_annotation"]
+            # Extract the representation template for the datapoints
+#             print(function_name)
+            try:
+                (
+                    prog_tree,
+                    comps_repr_templates_list,
+                    loops_repr_templates_list,
+                    comps_placeholders_indices_dict,
+                    loops_placeholders_indices_dict,
+                ) = get_representation_template(
+                    self.programs_dict[function_name],
+                    max_depth=self.max_depth,
+                    train_device=train_device,
+                )
+            except (NbAccessException, LoopsDepthException):
+                # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
+                self.nb_dropped += len(
+                    self.programs_dict[function_name]["schedules_list"]
+                )
+                continue
+            # Get the initial execution time for the program to calculate the speedups (initial exec time / transformed exec time)
+            program_exec_time = self.programs_dict[function_name][
+                "initial_execution_time"
+            ]
+            # Get the program tree footprint
+            tree_footprint = get_tree_footprint(prog_tree)
+            self.batches_dict[tree_footprint] = self.batches_dict.get(
+                tree_footprint,
+                {
+                    "tree": prog_tree,
+                    "comps_tensor_list": [],
+                    "loops_tensor_list": [],
+                    "datapoint_attributes_list": [],
+                    "speedups_list": [],
+                    "exec_time_list": [],
+                    "func_id": [],
+                },
+            )
+            # For each schedule (sequence of transformations) collected for this function
+            for schedule_index in range(
+                len(self.programs_dict[function_name]["schedules_list"])
+            ):
+                # Get the schedule JSON representation
+                schedule_json = self.programs_dict[function_name]["schedules_list"][schedule_index]
+                
+                # Get the transformed execution time
+                sched_exec_time = np.min(schedule_json["execution_times"])
+                
+                # Check if this schedule should be dropped
+                if drop_sched_func(self.programs_dict[function_name], schedule_index ) or (not sched_exec_time):
+                    self.nb_dropped += 1
+                    self.nb_pruned += 1
+                    continue
+                # Calculate the speed up obtained from applying the list of transformations spesified by the schedule
+                sched_speedup = program_exec_time / sched_exec_time
+
+                # Check whether we can set a default value for this speedup through the can_set_default_eval function.
+                def_sp = can_set_default_eval(self.programs_dict[function_name], schedule_index)
+                
+                
+                # If the function returns 0, this means no default value was spesified
+                if def_sp > 0:
+                    sched_speedup = def_sp
+
+                # Check whether we can clip the obtained speedup
+                sched_speedup = speedups_clip_func(sched_speedup)
+                
+                
+                # Fill the obtained template with the corresponsing schedule features
+                try:
+                    comps_tensor, loops_tensor = get_schedule_representation(
+                        program_json,
+                        schedule_json,
+                        comps_repr_templates_list,
+                        loops_repr_templates_list,
+                        comps_placeholders_indices_dict,
+                        loops_placeholders_indices_dict,
+                        self.max_depth,
+                    )
+                except NbTranformationException:
+#                 except (NbTranformationException, AssertionError):
+                    # If the number of transformations exceeded the specified max, we skip this schedule
+                    self.nb_dropped += 1
+                    
+                    # TODO remove the AssertionError catch from here or fix assertions 
+                    continue
+                except RandomMatrix :
+                    self.nb_dropped += 1
+                    self.nb_dropped_random_matrix += 1
+                    # TODO remove the AssertionError catch from here or fix assertions 
+                    continue
+                    
+                # Get information about this datapoint (memory use, execution time...)
+                datapoint_attributes = get_datapoint_attributes(
+                    function_name,
+                    self.programs_dict[function_name],
+                    schedule_index,
+                    tree_footprint,
+                )
+                # Add each part of the input to the batches dict
+                self.batches_dict[tree_footprint]["func_id"].append(index)
+                self.batches_dict[tree_footprint]["comps_tensor_list"].append(
+                    comps_tensor
+                )
+                self.batches_dict[tree_footprint]["loops_tensor_list"].append(
+                    loops_tensor
+                )
+                self.batches_dict[tree_footprint]["datapoint_attributes_list"].append(
+                    datapoint_attributes
+                )
+                self.batches_dict[tree_footprint]["speedups_list"].append(sched_speedup)
+                self.nb_datapoints += 1
+        
+        
+        storing_device = torch.device(store_device)
+#         print("number of dropped points due to uncoherent skewing parameters", nb_uncoherent_skewing_params)
+        print("Number of dropped points", self.nb_dropped)
+        print("Number of dropped points from random matrices", self.nb_dropped_random_matrix)
+        print("Batching ...")
+        # For each tree footprint in the dataset TODO explain what a tree footprint is 
+        for tree_footprint in tqdm(self.batches_dict):
+
+            # Shuffling the lists inside each footprint to avoid having batches with very low program diversity
+            zipped = list(
+                zip(
+                    self.batches_dict[tree_footprint]["datapoint_attributes_list"],
+                    self.batches_dict[tree_footprint]["comps_tensor_list"],
+                    self.batches_dict[tree_footprint]["loops_tensor_list"],
+                    self.batches_dict[tree_footprint]["speedups_list"],
+                    self.batches_dict[tree_footprint]["func_id"],
+                )
+            )
+
+            random.shuffle(zipped)
+            
+            (
+                self.batches_dict[tree_footprint]["datapoint_attributes_list"],
+                self.batches_dict[tree_footprint]["comps_tensor_list"],
+                self.batches_dict[tree_footprint]["loops_tensor_list"],
+                self.batches_dict[tree_footprint]["speedups_list"],
+                self.batches_dict[tree_footprint]["func_id"],
+            ) = zip(*zipped)
+            
+            # Split the data into batches of size max_batch_size
+            for chunk in range(
+                0,
+                len(self.batches_dict[tree_footprint]["speedups_list"]),
+                max_batch_size,
+            ):
+                if ( storing_device.type == "cuda" and (
+                        torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory
+                    ) > 0.80
+                ):  # Check GPU memory in order to avoid Out of memory error
+                    print(
+                        "GPU memory on "
+                        + str(storing_device)
+                        + " nearly full, switching to CPU memory"
+                    )
+                    storing_device = torch.device("cpu")
+                self.batched_datapoint_attributes.append(
+                    self.batches_dict[tree_footprint]["datapoint_attributes_list"][
+                        chunk : chunk + max_batch_size
+                    ]
+                )
+                self.batched_X.append(
+                    (
+                        self.batches_dict[tree_footprint]["tree"],
+                        
+                        torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
+                        
+                        torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
+                    )
+                )
+                self.batched_Y.append(
+                    torch.FloatTensor( self.batches_dict[tree_footprint]["speedups_list"][ chunk : chunk + max_batch_size ]).to(storing_device)
+                )
+
+        # shuffling batches to avoid having the same footprint in consecutive batches
+        zipped = list(
+            zip(
+                self.batched_X,
+                self.batched_Y,
+                self.batched_datapoint_attributes,
+            )
+        )
+        random.shuffle(zipped)
+        (
+            self.batched_X,
+            self.batched_Y,
+            self.batched_datapoint_attributes,
+        ) = zip(*zipped)
+
+        print(
+            f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}"
+        )
+        # Delete unecessary structures to optimize memory use
+        del self.programs_dict
+        del self.batches_dict
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            return [self[i] for i in range(start, stop, step)]
+        elif isinstance(index, int):
+            return (self.batched_X[index], self.batched_Y[index])
+        
+    def __len__(self):
+        return len(self.batched_Y)
+    
+    
+    
+    
+# Returns a representation of the tree structure of the program
+def get_tree_footprint(tree):
+    footprint = "<L" + str(int(tree["loop_index"])) + ">"
+    if tree["has_comps"]:
+        footprint += "["
+        for idx in tree["computations_indices"]:
+            footprint += "C" + str(int(idx))
+        footprint += "]"
+    for child in tree["child_list"]:
+        footprint += get_tree_footprint(child)
+    footprint += "</L" + str(int(tree["loop_index"])) + ">"
+    return footprint
+
+
+# load the data from the .pkl or .json dataset file and splits it according to the split_ratio parameter
+# Uses the Dataset class
+def load_data(
+    train_val_dataset_file,
+    split_ratio=None,
+    max_batch_size=2048,
+    drop_sched_func=None,
+    drop_prog_func=None,
+    default_eval=None,
+    speedups_clip_func=None,
+    store_device="cpu",
+    train_device="cpu",
+):
+    print("loading batches from: " + train_val_dataset_file)
+    
+    # create an instance of the Dataset class
+    dataset = Dataset(
+        train_val_dataset_file,
+        max_batch_size,
+        drop_sched_func,
+        drop_prog_func,
+        default_eval,
+        speedups_clip_func,
+        store_device=store_device,
+        train_device=train_device,
+    )
+    # If no split ratio is specified use the common 80 20 split
+    if split_ratio == None:
+        split_ratio = 0.2
+    if split_ratio > 1:
+        validation_size = split_ratio
+    else:
+        validation_size = int(split_ratio * len(dataset))
+    indices = list(range(len(dataset)))
+
+    # Divide the dataset indecies into validation and training 
+    val_batches_indices, train_batches_indices = (
+        indices[:validation_size],
+        indices[validation_size:],
+    )
+    val_batches_list = []
+    train_batches_list = []
+    for i in val_batches_indices:
+        val_batches_list.append(dataset[i])
+    for i in train_batches_indices:
+        train_batches_list.append(dataset[i])
+    print("Data loaded")
+    print(
+        "Sizes: " + str((len(val_batches_list), len(train_batches_list))) + " batches"
+    )
+    return (
+        dataset,
+        val_batches_list,
+        val_batches_indices,
+        train_batches_list,
+        train_batches_indices,
+    )
+# TODO purpose of this dict / better placement
+global_dioph_sols_dict = dict()
+# A function to extract the transformations applied on a spesific computation in the form of a vector of tags
+# Padding is added if the number of transformations is less than the maximum value of MAX_NUM_TRANSFORMATIONS
+# Currently our dataset represents transformations in two different formats.
+#         1- in the form of matrices from the polyhedral representation
+#         2- in the form of tags for each transformation
+# We generated a variaty of representations to test which one is more useful for our spesfici usage
+# In this function we will be unifying all of the dataset into the tags representation 
+# The tag representation is as follows:
+#         ['type_of_transformation', 'first_interchange_loop', 'second_interchange_loop', 'reversed_loop', 'first_skewing_loop', 'second_skewing_loop', 'first_skew_factor', 'second_skew_factor']
+#     Where the type_of_transformation tag is:
+#         - 0 for no transformation being applied
+#         - 1 for loop interchange
+#         - 2 for loop reversal
+#         - 3 for loop skewing
+        
+def get_padded_transformation_tags(
     program_json, schedule_json, comp_name, max_depth=None
 ):
-    # print(program_json["computations"],schedule_json[comp_name])
-
-    #comp_name = list(program_json["computations"].keys())[0]
+    # Extract information about the computation and the transformations that were applied from the json input
     comp_dict = program_json["computations"][comp_name]
     comp_schedule_dict = schedule_json[comp_name]
     nb_iterators = len(comp_dict["iterators"])
     loop_nest = comp_dict["iterators"][:]
+    
+    # Create an identity vector that represents that no transformation was applied
     identity = np.zeros((nb_iterators, nb_iterators), int)
     np.fill_diagonal(identity, 1)
-    if "transformation_matrices" in comp_schedule_dict:
-        # torch.concat( list(X.view(-1,3,3)), dim=1)
-        if comp_schedule_dict["transformation_matrices"] != []:
-            if ("transformation_matrix" in comp_schedule_dict) and (
-                comp_schedule_dict["transformation_matrix"]
-            ):
-                # print("transformation_matrix@2",comp_schedule_dict["transformation_matrix"])
-                final_transformation_matrix = np.array(
-                    list(map(int, comp_schedule_dict["transformation_matrix"]))
-                ).reshape(nb_iterators, nb_iterators)
-            else:
-                final_transformation_matrix = identity.copy()
+    identity_tags = np.zeros((1,MAX_TAGS), dtype=np.int32)
+    
+    tag_factors = []
+    for transformation in comp_schedule_dict['transformations_list']:
+        tag_factors.append(transformation)
+    
+    
+    # Add padding to the sequence of vectors in case the number of transformations is less than MAX_NUM_TRANSFORMATIONS+1
+    tags_list = [item for sublist in tag_factors for item in sublist]
+    tags_list += [0]*(MAX_NUM_TRANSFORMATIONS*MAX_TAGS - len(tags_list)) 
+    
+    return tags_list
 
-            final_mat = final_transformation_matrix
-            final_mat = np.c_[np.ones(final_mat.shape[0]), final_mat]
-            final_mat = np.r_[[np.ones(final_mat.shape[1])], final_mat]
-            final_mat = np.pad(
-                final_mat,
-                [
-                    (0, max_depth + 1 - final_mat.shape[0]),
-                    (0, max_depth + 1 - final_mat.shape[1]),
-                ],
-                mode="constant",
-                constant_values=0,
-            )
-            final_mat_factors = [final_mat.reshape(1, -1)]
-            for matrix in comp_schedule_dict["transformation_matrices"][::-1]:
-                assert np.sqrt(len(matrix)) == nb_iterators
-                transformation_matrix = np.array(list(map(int, matrix))).reshape(
-                    nb_iterators, nb_iterators
-                )
-                if (transformation_matrix == identity).all():
-                    continue
-                # print(transformation_matrix)
-                transformation_matrix = np.c_[
-                    np.ones(transformation_matrix.shape[0]), transformation_matrix
-                ]
-                transformation_matrix = np.r_[
-                    [np.ones(transformation_matrix.shape[1])], transformation_matrix
-                ]
-                transformation_matrix = np.pad(
-                    transformation_matrix,
-                    [
-                        (0, max_depth + 1 - transformation_matrix.shape[0]),
-                        (0, max_depth + 1 - transformation_matrix.shape[1]),
-                    ],
-                    mode="constant",
-                    constant_values=0,
-                )
-                final_mat_factors.append(transformation_matrix.reshape(1, -1))
-            if len(final_mat_factors) > MAX_MATRICES:
-                # print("length exceeded = ", len(final_mat_factors))
-                raise NbMatricesException
-                # final_mat_factors = final_mat_factors[:MAX_MATRICES]
-            final_mat = (
-                np.concatenate(final_mat_factors, axis=0)
-                if final_mat_factors
-                else identity.copy()
-            )
-        else:
-            final_mat = identity.copy()
-            final_transformation_matrix = final_mat
-            final_mat = np.c_[np.ones(final_mat.shape[0]), final_mat]
-            final_mat = np.r_[[np.ones(final_mat.shape[1])], final_mat]
-            final_mat = np.pad(
-                final_mat,
-                [
-                    (0, max_depth + 1 - final_mat.shape[0]),
-                    (0, max_depth + 1 - final_mat.shape[1]),
-                ],
-                mode="constant",
-                constant_values=0,
-            ).reshape(1, -1)
-
-        comparison_matrix = identity.copy()
-        for mat in comp_schedule_dict["transformation_matrices"][::-1]:
-            comparison_matrix = comparison_matrix @ np.array(
-                list(map(int, mat))
-            ).reshape(nb_iterators, nb_iterators)
-        # print(comparison_matrix,final_transformation_matrix)
-        assert (comparison_matrix == final_transformation_matrix).all()
-    else:
-        interchange_matrix = identity.copy()
-        if comp_schedule_dict["interchange_dims"]:
-            first_iter_index = loop_nest.index(
-                comp_schedule_dict["interchange_dims"][0]
-            )
-            second_iter_index = loop_nest.index(
-                comp_schedule_dict["interchange_dims"][1]
-            )
-            interchange_matrix[first_iter_index, first_iter_index] = 0
-            interchange_matrix[second_iter_index, second_iter_index] = 0
-            interchange_matrix[first_iter_index, second_iter_index] = 1
-            interchange_matrix[second_iter_index, first_iter_index] = 1
-            loop_nest[first_iter_index], loop_nest[second_iter_index] = (
-                loop_nest[second_iter_index],
-                loop_nest[first_iter_index],
-            )
-
-        skewing_matrix = identity.copy()
-        if comp_schedule_dict["skewing"]:
-            first_iter_index = loop_nest.index(
-                comp_schedule_dict["skewing"]["skewed_dims"][0]
-            )
-            second_iter_index = loop_nest.index(
-                comp_schedule_dict["skewing"]["skewed_dims"][1]
-            )
-            first_factor = int(comp_schedule_dict["skewing"]["skewing_factors"][0])
-            second_factor = int(comp_schedule_dict["skewing"]["skewing_factors"][1])
-
-            if (first_factor, second_factor) in global_dioph_sols_dict:
-                a, b = global_dioph_sols_dict[(first_factor, second_factor)]
-            else:
-                a, b = linear_diophantine_default(first_factor, second_factor)
-            skewing_matrix[first_iter_index, first_iter_index] = first_factor
-            skewing_matrix[first_iter_index, second_iter_index] = second_factor
-            skewing_matrix[second_iter_index, first_iter_index] = a
-            skewing_matrix[second_iter_index, second_iter_index] = b
-
-        final_mat = skewing_matrix @ interchange_matrix
-
-        final_mat_factors = []
-        for matrix in [final_mat, skewing_matrix, interchange_matrix]:
-            if (matrix == identity).all():
-                continue
-            matrix = np.c_[np.ones(matrix.shape[0]), matrix]
-            matrix = np.r_[[np.ones(matrix.shape[1])], matrix]
-            matrix = np.pad(
-                matrix,
-                [
-                    (0, max_depth + 1 - matrix.shape[0]),
-                    (0, max_depth + 1 - matrix.shape[1]),
-                ],
-                mode="constant",
-                constant_values=0,
-            )
-            final_mat_factors.append(matrix.reshape(1, -1))
-        final_mat = (
-            np.concatenate(final_mat_factors, axis=0)
-            if final_mat_factors
-            else identity.copy()
-        )
-
-    padded_mat = final_mat
-
-    if max_depth != None:
-        #    padded_mat = np.c_[np.ones(padded_mat.shape[0]), padded_mat]
-        #    padded_mat = np.r_[[np.ones(padded_mat.shape[1])], padded_mat]
-        padding_ranges = [
-            (0, MAX_MATRICES - final_mat.shape[0]),
-            (0, (max_depth + 1) ** 2 - final_mat.shape[1]),
-        ]
-        try:
-            padded_mat = np.pad(
-                final_mat,
-                padding_ranges,
-                mode="constant",
-                constant_values=0,
-            )
-
-        except ValueError:
-            print("ValueError")
-            print(final_mat.shape)
-            print(padding_ranges)
-    # print("padded_mat",padded_mat.reshape(6,6))
-    return padded_mat
-
-
+# A function to retrieve information about each datapoint
 def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footprint):
     schedule_json = program_dict["schedules_list"][schedule_index]
     sched_id = str(schedule_index).zfill(4)
@@ -696,20 +908,22 @@ def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footp
         speedup,
     )
 
-
+# returns a string representation of a schedule and the transformations applied in it
 def sched_json_to_sched_str(sched_json):
-
+    
+    # If the string representation is already in the dataset nothing needs to be done
     if "sched_str" in sched_json:
         return sched_json["sched_str"]
-
+    
     orig_loop_nest = []
     orig_loop_nest.append(sched_json["tree_structure"]["loop_name"])
     child_list = sched_json["tree_structure"]["child_list"]
+    
     while len(child_list) > 0:
         child_loop = child_list[0]
         orig_loop_nest.append(child_loop["loop_name"])
         child_list = child_loop["child_list"]
-
+    
     comp_name = [
         n
         for n in sched_json.keys()
@@ -718,13 +932,16 @@ def sched_json_to_sched_str(sched_json):
     schedule = sched_json[comp_name]
     transf_loop_nest = orig_loop_nest
     sched_str = ""
-
+    
+    #TODO fix this in the dataset
     if "Transformation Matrix" in schedule:
         if schedule["Transformation Matrix"]:
             sched_str += "M(" + ",".join(schedule["Transformation Matrix"]) + ")"
+    
     elif "transformation_matrix" in schedule:
         if schedule["transformation_matrix"]:
             sched_str += "M(" + ",".join(schedule["transformation_matrix"]) + ")"
+            
     if schedule["interchange_dims"]:
         first_dim_index = transf_loop_nest.index(schedule["interchange_dims"][0])
         second_dim_index = transf_loop_nest.index(schedule["interchange_dims"][1])
@@ -752,6 +969,7 @@ def sched_json_to_sched_str(sched_json):
     if schedule["parallelized_dim"]:
         dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
         sched_str += "P(L" + str(dim_index) + ")"
+        
     if schedule["tiling"]:
         if schedule["tiling"]["tiling_depth"] == 2:
             first_dim = schedule["tiling"]["tiling_dims"][0]
@@ -813,6 +1031,7 @@ def sched_json_to_sched_str(sched_json):
                 third_dim + "_inner",
             )
             transf_loop_nest.remove(third_dim)
+            
     if schedule["unrolling_factor"]:
         dim_index = len(transf_loop_nest) - 1
         dim_name = transf_loop_nest[-1]
@@ -823,7 +1042,6 @@ def sched_json_to_sched_str(sched_json):
         )
 
     return sched_str
-
 
 def pad_access_matrix(access_matrix, max_depth):
     access_matrix = np.array(access_matrix)
@@ -837,7 +1055,7 @@ def pad_access_matrix(access_matrix, max_depth):
 
     return padded_access_matrix
 
-
+# TODO what does this function do
 def isl_to_write_matrix(isl_map):
     comp_iterators_str = re.findall(r"\[(.*)\]\s*->", isl_map)[0]
     buffer_iterators_str = re.findall(r"->\s*\w*\[(.*)\]", isl_map)[0]
@@ -852,7 +1070,7 @@ def isl_to_write_matrix(isl_map):
                 break
     return matrix
 
-
+# TODO what does this function do
 def isl_to_write_dims(
     isl_map,
 ):
@@ -862,6 +1080,7 @@ def isl_to_write_dims(
     return buf_iter_names
 
 
+# returns a pandas dataframe representing the dataset
 def get_results_df(
     dataset, batches_list, indices, model, log=False, train_device="cpu"
 ):
@@ -924,35 +1143,35 @@ def get_results_df(
 
     return df
 
-
+# Calculate the Normalized Discounted Cumulative Gain while only considiring the top rated schedule (k=1)
 def function_wise_ndcg_1(g):
     if len(g["target"]) < 2:
         return pd.Series(dict(nDCG_1=np.nan))
     score = ndcg_score([g["target"].tolist()], [g["prediction"].tolist()], k=1)
     return pd.Series(dict(nDCG_1=score))
 
-
+# Calculate the Normalized Discounted Cumulative Gain while only considiring the top 5 rated schedules (k=5)
 def function_wise_ndcg_5(g):
     if len(g["target"]) < 2:
         return pd.Series(dict(nDCG_5=np.nan))
     score = ndcg_score([g["target"].tolist()], [g["prediction"].tolist()], k=5)
     return pd.Series(dict(nDCG_5=score))
 
-
+# Calculate the Normalized Discounted Cumulative Gain while considiring all the schedules
 def function_wise_ndcg_full(g):
     if len(g["target"]) < 2:
         return pd.Series(dict(nDCG=np.nan))
     score = ndcg_score([g["target"].tolist()], [g["prediction"].tolist()], k=None)
     return pd.Series(dict(nDCG=score))
 
-
+# Calculate the Spearman correlation coefficient
 def function_wise_spearman(g):
     if len(g["target"]) < 2:
         return pd.Series(dict(Spearman_r=np.nan))
     score = spearmanr(g["target"], g["prediction"])[0]
     return pd.Series(dict(Spearman_r=score))
 
-
+# Calculate the absolute percentage error
 def function_wise_ape(g):
     score = np.mean(g["APE"])
     return pd.Series(dict(MAPE=score))
@@ -1003,269 +1222,9 @@ def simplify_sched_str(
     return re.sub("(M\({[\dC\,]+},[\d\,\-]+\))+", new_mats_str, sched_str)
 
 
-class Dataset:
-    def __init__(
-        self,
-        dataset_filename,
-        max_batch_size,
-        drop_sched_func=None,
-        drop_prog_func=None,
-        can_set_default_eval=None,
-        speedups_clip_func=None,
-        store_device="cpu",
-        train_device="cpu",
-    ):
-
-        if dataset_filename.endswith("json"):
-            with open(dataset_filename, "r") as f:
-                dataset_str = f.read()
-            self.programs_dict = json.loads(dataset_str)
-        elif dataset_filename.endswith("pkl"):
-            with open(dataset_filename, "rb") as f:
-                self.programs_dict = pickle.load(f)
-
-        self.batched_X = []
-        self.batched_Y = []
-        self.batches_dict = dict()
-        self.max_depth = 5
-        self.nb_dropped = 0
-        self.nb_pruned = 0
-        self.dropped_funcs = []
-        self.function_names_map = dict()
-        self.batched_datapoint_attributes = []
-        self.nb_datapoints = 0
-
-        if drop_sched_func == None:
-
-            def drop_sched_func(x, y):
-                return False
-
-        if drop_prog_func == None:
-
-            def drop_prog_func(x):
-                return False
-
-        if speedups_clip_func == None:
-
-            def speedups_clip_func(x):
-                return x
-
-        if can_set_default_eval == None:
-
-            def can_set_default_eval(x, y):
-                return 0
-
-        functions_list = list(self.programs_dict.keys())
-        random.Random(42).shuffle(functions_list)
-        for index, function_name in enumerate(tqdm(functions_list)):
-            if drop_prog_func(self.programs_dict[function_name]):
-                self.nb_dropped += len(
-                    self.programs_dict[function_name]["schedules_list"]
-                )
-                self.dropped_funcs.append(function_name)
-                continue
-
-            program_json = self.programs_dict[function_name]["program_annotation"]
-
-            try:
-                (
-                    prog_tree,
-                    comps_repr_templates_list,
-                    loops_repr_templates_list,
-                    comps_placeholders_indices_dict,
-                    loops_placeholders_indices_dict,
-                ) = get_representation_template(
-                    self.programs_dict[function_name],
-                    max_depth=self.max_depth,
-                    train_device=train_device,
-                )
-            except (NbAccessException, LoopsDepthException):
-                self.nb_dropped += len(
-                    self.programs_dict[function_name]["schedules_list"]
-                )
-                continue
-            program_exec_time = self.programs_dict[function_name][
-                "initial_execution_time"
-            ]
-            tree_footprint = get_tree_footprint(prog_tree)
-            self.batches_dict[tree_footprint] = self.batches_dict.get(
-                tree_footprint,
-                {
-                    "tree": prog_tree,
-                    "comps_tensor_list": [],
-                    "loops_tensor_list": [],
-                    "datapoint_attributes_list": [],
-                    "speedups_list": [],
-                    "exec_time_list": [],
-                    "func_id": [],
-                },
-            )
-
-            for schedule_index in range(
-                len(self.programs_dict[function_name]["schedules_list"])
-            ):
-                schedule_json = self.programs_dict[function_name]["schedules_list"][
-                    schedule_index
-                ]
-                sched_exec_time = np.min(schedule_json["execution_times"])
-                if drop_sched_func(
-                    self.programs_dict[function_name], schedule_index
-                ) or (not sched_exec_time):
-                    self.nb_dropped += 1
-                    self.nb_pruned += 1
-                    continue
-
-                sched_speedup = program_exec_time / sched_exec_time
-
-                def_sp = can_set_default_eval(
-                    self.programs_dict[function_name], schedule_index
-                )
-                if def_sp > 0:
-                    sched_speedup = def_sp
-
-                sched_speedup = speedups_clip_func(sched_speedup)
-
-                try:
-                    comps_tensor, loops_tensor = get_schedule_representation(
-                        program_json,
-                        schedule_json,
-                        comps_repr_templates_list,
-                        loops_repr_templates_list,
-                        comps_placeholders_indices_dict,
-                        loops_placeholders_indices_dict,
-                        self.max_depth,
-                    )
-                except (NbMatricesException, AssertionError):
-                    # print(function_name, schedule_json)
-                    continue
-
-                datapoint_attributes = get_datapoint_attributes(
-                    function_name,
-                    self.programs_dict[function_name],
-                    schedule_index,
-                    tree_footprint,
-                )
-
-                self.batches_dict[tree_footprint]["func_id"].append(index)
-                self.batches_dict[tree_footprint]["comps_tensor_list"].append(
-                    comps_tensor
-                )
-                self.batches_dict[tree_footprint]["loops_tensor_list"].append(
-                    loops_tensor
-                )
-                self.batches_dict[tree_footprint]["datapoint_attributes_list"].append(
-                    datapoint_attributes
-                )
-                self.batches_dict[tree_footprint]["speedups_list"].append(sched_speedup)
-                self.nb_datapoints += 1
-
-        storing_device = torch.device(store_device)
-        print("Batching ...")
-        for tree_footprint in tqdm(self.batches_dict):
-
-            # shuffling the lists inside each footprint to avoid having batches with very low program diversity
-            zipped = list(
-                zip(
-                    self.batches_dict[tree_footprint]["datapoint_attributes_list"],
-                    self.batches_dict[tree_footprint]["comps_tensor_list"],
-                    self.batches_dict[tree_footprint]["loops_tensor_list"],
-                    self.batches_dict[tree_footprint]["speedups_list"],
-                    self.batches_dict[tree_footprint]["func_id"],
-                )
-            )
-
-            random.shuffle(zipped)
-            (
-                self.batches_dict[tree_footprint]["datapoint_attributes_list"],
-                self.batches_dict[tree_footprint]["comps_tensor_list"],
-                self.batches_dict[tree_footprint]["loops_tensor_list"],
-                self.batches_dict[tree_footprint]["speedups_list"],
-                self.batches_dict[tree_footprint]["func_id"],
-            ) = zip(*zipped)
-
-            for chunk in range(
-                0,
-                len(self.batches_dict[tree_footprint]["speedups_list"]),
-                max_batch_size,
-            ):
-                if (
-                    storing_device.type == "cuda"
-                    and (
-                        torch.cuda.memory_allocated(storing_device.index)
-                        / torch.cuda.get_device_properties(
-                            storing_device.index
-                        ).total_memory
-                    )
-                    > 0.80
-                ):  # Check GPU memory in order to avoid Out of memory error
-                    print(
-                        "GPU memory on "
-                        + str(storing_device)
-                        + " nearly full, switching to CPU memory"
-                    )
-                    storing_device = torch.device("cpu")
-                self.batched_datapoint_attributes.append(
-                    self.batches_dict[tree_footprint]["datapoint_attributes_list"][
-                        chunk : chunk + max_batch_size
-                    ]
-                )
-                self.batched_X.append(
-                    (
-                        self.batches_dict[tree_footprint]["tree"],
-                        torch.cat(
-                            self.batches_dict[tree_footprint]["comps_tensor_list"][
-                                chunk : chunk + max_batch_size
-                            ],
-                            0,
-                        ).to(storing_device),
-                        torch.cat(
-                            self.batches_dict[tree_footprint]["loops_tensor_list"][
-                                chunk : chunk + max_batch_size
-                            ],
-                            0,
-                        ).to(storing_device),
-                    )
-                )
-                self.batched_Y.append(
-                    torch.FloatTensor(
-                        self.batches_dict[tree_footprint]["speedups_list"][
-                            chunk : chunk + max_batch_size
-                        ]
-                    ).to(storing_device)
-                )
-
-        # shuffling batches to avoid having the same footprint in consecutive batches
-        zipped = list(
-            zip(
-                self.batched_X,
-                self.batched_Y,
-                self.batched_datapoint_attributes,
-            )
-        )
-        random.shuffle(zipped)
-        (
-            self.batched_X,
-            self.batched_Y,
-            self.batched_datapoint_attributes,
-        ) = zip(*zipped)
-
-        print(
-            f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}"
-        )
-        del self.programs_dict
-        del self.batches_dict
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            start, stop, step = index.indices(len(self))
-            return [self[i] for i in range(start, stop, step)]
-        elif isinstance(index, int):
-            return (self.batched_X[index], self.batched_Y[index])
-
-    def __len__(self):
-        return len(self.batched_Y)
 
 
+# TODO
 def has_skippable_loop_1comp(
     prog_dict,
 ):
@@ -1328,7 +1287,7 @@ def has_skippable_loop_1comp(
 
     return True
 
-
+#TODO
 def sched_is_prunable_1comp(schedule_str, prog_depth):
     if re.search("P\(L2\)U\(L3,\d+\)", schedule_str):
         return True
@@ -1340,7 +1299,7 @@ def sched_is_prunable_1comp(schedule_str, prog_depth):
             return True
     return False
 
-
+#TODO
 def can_set_default_eval_1comp(schedule_str, prog_depth):
     def_sp = 0
 
@@ -1356,19 +1315,39 @@ def can_set_default_eval_1comp(schedule_str, prog_depth):
 def access_is_stencil(access):
     return np.any(access["access_matrix"], axis=0)[-1]
 
-
+# Solving the Linear Diophantine equation & finding basic solution (sigma & gamma) for : f_i* sigma - f_j*gamma = 1
+# Used to get skewing parameters
 def linear_diophantine_default(f_i, f_j):
+    n1 = abs(f_i)
+    n2 = abs(f_j)
+    
+    while(n1 != n2):
+        if(n1 > n2):
+            n1 -=  n2
+        else:
+            n2 -=  n1
+            
+    # Update f_i and f_j to equivalent but prime between themselfs value
+    f_i = f_i / n1
+    f_j = f_j / n1
+    
     found = False
     gamma = 0
     sigma = 1
+    
     if (f_j == 1) or (f_i == 1):
         gamma = f_i - 1
         sigma = 1
+        # Since sigma = 1  then
+        # f_i - gamma * f_j = 1 & using the previous condition :
+        #  - f_i = 1 : then gamma = 0 (f_i-1) is enough
+        #  - f_j = 1 : then gamma = f_i -1  
     else:
         if (f_j == -1) and (f_i > 1):
             gamma = 1
             sigma = 0
         else:
+            # General case : solving the Linear Diophantine equation & finding basic solution (sigma & gamma) for : f_i* sigma - f_j*gamma = 1
             i = 0
             while (i < 100) and (not found):
                 if ((sigma * f_i) % abs(f_j)) == 1:
@@ -1377,13 +1356,13 @@ def linear_diophantine_default(f_i, f_j):
                     sigma += 1
                     i += 1
             if not found:
+                # Detect infinite loop and prevent it in case where f_i and f_j are not prime between themselfs
                 print("Error cannof find solution to diophantine equation")
                 return
             gamma = ((sigma * f_i) - 1) / f_j
-
     return gamma, sigma
 
-
+#TODO
 def wrongly_pruned_schedule(program_dict, schedule_index):
     schedule_dict = program_dict["schedules_list"][schedule_index]
     if not "sched_str" in schedule_dict:
@@ -1421,14 +1400,20 @@ def wrongly_pruned_schedule(program_dict, schedule_index):
                 return True
     return False
 
+#TODO
 def speedup_clip(speedup):
     if speedup < 0.01:
         speedup = 0.01
     return speedup
 
-
-def drop_program(prog_dict):
+#TODO
+def drop_program(prog_dict, prog_name):
+#     print(prog_name[8:])
     if len(prog_dict["schedules_list"]) < 2:
+        return True
+    if ( 750000 <= int(prog_name[8:]) and int(prog_name[8:])<=752600 ):
+    
+        print("Found an random matrix program", prog_name)
         return True
     if has_skippable_loop_1comp(prog_dict):
         return True
@@ -1438,7 +1423,7 @@ def drop_program(prog_dict):
         return True
     return False
 
-
+#TODO
 def drop_schedule(prog_dict, schedule_index):
     schedule_json = prog_dict["schedules_list"][schedule_index]
     schedule_str = sched_json_to_sched_str(schedule_json)
@@ -1457,7 +1442,7 @@ def drop_schedule(prog_dict, schedule_index):
 
     return False
 
-
+#TODO
 def default_eval(prog_dict, schedule_index):
     schedule_json = prog_dict["schedules_list"][schedule_index]
     schedule_str = sched_json_to_sched_str(schedule_json)
@@ -1468,4 +1453,28 @@ def default_eval(prog_dict, schedule_index):
         return can_set_default_eval_1comp(schedule_str, program_depth)
     else:
         return 0
-
+def get_involved_comps(node):
+        result = []
+        if(len(node)==0): 
+            return result
+        for comp in node["computations_list"]:
+            result.append(comp)
+        for child in node["child_list"]:
+            for comp in get_involved_comps(child):
+                result.append(comp)
+        return result
+def get_comp_iterators_from_tree_struct(schedule_json, comp_name):
+    tree = schedule_json["tree_structure"]
+    level = tree
+    iterators = []
+    to_explore = []
+    to_explore.append(tree)
+    while(to_explore):
+        level = to_explore.pop(0)
+        if(comp_name in get_involved_comps(level)):
+            iterators.append(level['loop_name'])
+            
+        for element in level["child_list"]:
+            to_explore.append(element)
+    
+    return iterators

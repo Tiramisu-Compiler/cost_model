@@ -51,6 +51,7 @@ def main(config: RecursiveLSTMConfig):
     # Reading data
     logging.info("Reading the dataset")
     bl_dict = read_datasets(config)
+#     train_device = "cuda:0"
     train_device = "cuda:0"
 
     # Defining the model
@@ -59,7 +60,7 @@ def main(config: RecursiveLSTMConfig):
         input_size=config.model.input_size,
         comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
         drops=list(config.model.drops),
-        loops_tensor_size=20,
+        loops_tensor_size=8,
         train_device=train_device,
     )
     for param in model.parameters():

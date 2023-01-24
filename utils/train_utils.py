@@ -68,6 +68,8 @@ def train_model(
                     inputs[0],
                     inputs[1].to(train_device),
                     inputs[2].to(train_device),
+                    inputs[3].to(train_device),
+                    inputs[4].to(train_device),
                 )
                 labels = labels.to(train_device)
 

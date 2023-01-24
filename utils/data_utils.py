@@ -56,7 +56,8 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     for comp_index, comp_name in enumerate(ordered_comp_list):
         
         comp_dict = computations_dict[comp_name]
-        
+        expr_dict = comp_dict["expression_representation"]
+        comps_expr_repr_templates_list.append(get_tree_expr_repr(expr_dict))
         if len(comp_dict["accesses"]) > max_accesses:
             raise NbAccessException
         
@@ -108,7 +109,16 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         iterators_repr.append(c_code + "-TransformationTagsStart")
         iterators_repr.extend(["M"] * (MAX_TAGS * MAX_NUM_TRANSFORMATIONS - 2))
         iterators_repr.append(c_code + "-TransformationTagsEnd")
-
+        
+        # Adding initial constraint matrix
+        iterators_repr.append(c_code+'-OgConstraintMatrixStart')
+        iterators_repr.extend(['C']*((max_depth+1)*((max_depth+1)*2)-2))
+        iterators_repr.append(c_code+'-OgConstraintMatrixEnd')
+        # Adding transformed constraint matrix
+        iterators_repr.append(c_code+'-ConstraintMatrixStart')
+        iterators_repr.extend(['C']*((max_depth+1)*((max_depth+1)*2)-2))
+        iterators_repr.append(c_code+'-ConstraintMatrixEnd')
+        
         # Add the loop representation to the computation vector 
         comp_repr_template.extend(iterators_repr)
         
@@ -147,10 +157,10 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         
         
         # Add a historgram of operations for this computation 
-        comp_repr_template.append(comp_dict["number_of_additions"])
-        comp_repr_template.append(comp_dict["number_of_subtraction"])
-        comp_repr_template.append(comp_dict["number_of_multiplication"])
-        comp_repr_template.append(comp_dict["number_of_division"])
+#         comp_repr_template.append(comp_dict["number_of_additions"])
+#         comp_repr_template.append(comp_dict["number_of_subtraction"])
+#         comp_repr_template.append(comp_dict["number_of_multiplication"])
+#         comp_repr_template.append(comp_dict["number_of_division"])
 
         comps_repr_templates_list.append(comp_repr_template)
         
@@ -223,6 +233,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         loops_repr_templates_list,
         comps_placeholders_indices_dict,
         loops_placeholders_indices_dict,
+        comps_expr_repr_templates_list,
     )
 
 
@@ -348,14 +359,30 @@ def get_schedule_representation(
         nb_tags_elements = tags_end[1] - tags_start[1] + 1
         
         assert len(padded_tags) == nb_tags_elements
+        
+        comps_repr[tags_start[0]][tags_start[1] : tags_end[1] + 1] = padded_tags
+        
+        ogc_start = comps_placeholders_indices_dict[c_code+'-OgConstraintMatrixStart']
+        
+        ogc_end = comps_placeholders_indices_dict[c_code+'-OgConstraintMatrixEnd']
+        
+        nb_mat_elements = ogc_end[1] - ogc_start[1] + 1
+        
+        max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
+        
+        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(len(comp_dict["iterators"]), max_depth_it).flatten().tolist()
+        
+        c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
+        
+        c_end = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixEnd']
+        
+        nb_mat_elements = c_end[1] - c_start[1] + 1
+        
+        max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
+        
+        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(len(comp_dict["iterators"]), max_depth_it, get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)).flatten().tolist()
+        
 
-        
-        comps_repr[tags_start[0]][
-            tags_start[1] : tags_end[1] + 1
-        ] = padded_tags
-
-        
-        
     # Fill the loop representation
     # Initialization
     loop_schedules_dict = dict()
@@ -571,6 +598,7 @@ class Dataset:
                     loops_repr_templates_list,
                     comps_placeholders_indices_dict,
                     loops_placeholders_indices_dict,
+                    comps_expr_repr_templates_list
                 ) = get_representation_template(
                     self.programs_dict[function_name],
                     max_depth=self.max_depth,
@@ -593,6 +621,7 @@ class Dataset:
                 {
                     "tree": prog_tree,
                     "comps_tensor_list": [],
+                    "comps_expr_tree_list": [],
                     "loops_tensor_list": [],
                     "datapoint_attributes_list": [],
                     "speedups_list": [],
@@ -601,9 +630,7 @@ class Dataset:
                 },
             )
             # For each schedule (sequence of transformations) collected for this function
-            for schedule_index in range(
-                len(self.programs_dict[function_name]["schedules_list"])
-            ):
+            for schedule_index in range(len(self.programs_dict[function_name]["schedules_list"]) ):
                 # Get the schedule JSON representation
                 schedule_json = self.programs_dict[function_name]["schedules_list"][schedule_index]
                 
@@ -642,16 +669,12 @@ class Dataset:
                         self.max_depth,
                     )
                 except NbTranformationException:
-#                 except (NbTranformationException, AssertionError):
                     # If the number of transformations exceeded the specified max, we skip this schedule
-                    self.nb_dropped += 1
-                    
-                    # TODO remove the AssertionError catch from here or fix assertions 
+                    self.nb_dropped += 1 
                     continue
                 except RandomMatrix :
                     self.nb_dropped += 1
                     self.nb_dropped_random_matrix += 1
-                    # TODO remove the AssertionError catch from here or fix assertions 
                     continue
                     
                 # Get information about this datapoint (memory use, execution time...)
@@ -663,19 +686,36 @@ class Dataset:
                 )
                 # Add each part of the input to the batches dict
                 self.batches_dict[tree_footprint]["func_id"].append(index)
-                self.batches_dict[tree_footprint]["comps_tensor_list"].append(
-                    comps_tensor
-                )
-                self.batches_dict[tree_footprint]["loops_tensor_list"].append(
-                    loops_tensor
-                )
-                self.batches_dict[tree_footprint]["datapoint_attributes_list"].append(
-                    datapoint_attributes
-                )
+                
+                self.batches_dict[tree_footprint]["comps_tensor_list"].append(comps_tensor)
+                
+                self.batches_dict[tree_footprint]["loops_tensor_list"].append(loops_tensor)
+                
+                self.batches_dict[tree_footprint]["datapoint_attributes_list"].append(datapoint_attributes )
+                
+                self.batches_dict[tree_footprint]["comps_expr_tree_list"].append(comps_expr_repr_templates_list)
+                
                 self.batches_dict[tree_footprint]["speedups_list"].append(sched_speedup)
                 self.nb_datapoints += 1
         
-        
+        max_exprs = 0
+        for tree_footprint in self.batches_dict:
+            max_exprs = max([max([max([len(comp) for comp in function])
+                                  for function in self.batches_dict[tree_footprint]["comps_expr_tree_list"]]), max_exprs])
+            
+        for tree_footprint in self.batches_dict:
+            lengths = []
+            for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
+                lengths.append([])
+                for j in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i])):
+                    lengths[i].append(len(
+                        self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j]))
+                    self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j].extend(
+                        [[0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
+                self.batches_dict[tree_footprint]["comps_expr_tree_list"][i] = torch.tensor(
+                    [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]])
+            self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"] = torch.tensor(
+                lengths)
         storing_device = torch.device(store_device)
 #         print("number of dropped points due to uncoherent skewing parameters", nb_uncoherent_skewing_params)
         print("Number of dropped points", self.nb_dropped)
@@ -689,6 +729,8 @@ class Dataset:
                 zip(
                     self.batches_dict[tree_footprint]["datapoint_attributes_list"],
                     self.batches_dict[tree_footprint]["comps_tensor_list"],
+                    self.batches_dict[tree_footprint]["comps_expr_tree_list"],
+                    self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
                     self.batches_dict[tree_footprint]["loops_tensor_list"],
                     self.batches_dict[tree_footprint]["speedups_list"],
                     self.batches_dict[tree_footprint]["func_id"],
@@ -700,6 +742,8 @@ class Dataset:
             (
                 self.batches_dict[tree_footprint]["datapoint_attributes_list"],
                 self.batches_dict[tree_footprint]["comps_tensor_list"],
+                self.batches_dict[tree_footprint]["comps_expr_tree_list"],
+                self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
                 self.batches_dict[tree_footprint]["loops_tensor_list"],
                 self.batches_dict[tree_footprint]["speedups_list"],
                 self.batches_dict[tree_footprint]["func_id"],
@@ -733,12 +777,14 @@ class Dataset:
                         torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
                         
                         torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
+                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
+                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
                     )
                 )
                 self.batched_Y.append(
                     torch.FloatTensor( self.batches_dict[tree_footprint]["speedups_list"][ chunk : chunk + max_batch_size ]).to(storing_device)
                 )
-
+        
         # shuffling batches to avoid having the same footprint in consecutive batches
         zipped = list(
             zip(
@@ -1478,3 +1524,28 @@ def get_comp_iterators_from_tree_struct(schedule_json, comp_name):
             to_explore.append(element)
     
     return iterators
+def get_expr_repr(expr):
+        if(expr == "add"):
+            return [1, 0, 0, 0, 0]
+        elif(expr == "sub"):
+            return [0, 1, 0, 0, 0]
+        elif(expr == "mul"):
+            return [0, 0, 1, 0, 0]
+        elif(expr == "div"):
+            return [0, 0, 0, 1, 0]
+        # elif(expr == "value"):
+        #     return [0, 0, 0, 0, 1, 0, 0, 0]
+        # elif(expr == "access"):
+        #     return [0, 0, 0, 0, 0, 1, 0, 0]
+        # elif(expr == "buffer"):
+        #     return [0, 0, 0, 0, 0, 0, 1, 0]
+        else:
+            return [0, 0, 0, 0, 1]
+def get_tree_expr_repr(node):
+        expr_tensor = []
+        if node["children"] != []:
+            for child_node in node["children"]:
+                expr_tensor.extend(get_tree_expr_repr(child_node))
+        expr_tensor.append(get_expr_repr(node["expr_type"]))
+
+        return expr_tensor

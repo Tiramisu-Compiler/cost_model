@@ -64,7 +64,8 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         
         comp_dict = computations_dict[comp_name]
         expr_dict = comp_dict["expression_representation"]
-        comps_expr_repr_templates_list.append(get_tree_expr_repr(expr_dict))
+        comp_type = comp_dict["data_type"]
+        comps_expr_repr_templates_list.append(get_tree_expr_repr(expr_dict, comp_type))
         if len(comp_dict["accesses"]) > max_accesses:
             raise NbAccessException
         
@@ -247,6 +248,11 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
 
 # TODO add description
 def update_tree_atributes(node, loops_indices_dict, comps_indices_dict, train_device="cpu"):
+        if "roots" in node :
+            for root in node["roots"]:
+                update_tree_atributes(root, train_device=train_device)
+            return node
+
         node["loop_index"] = torch.tensor(loops_indices_dict[node["loop_name"]]).to(
             train_device
         )
@@ -705,11 +711,13 @@ class Dataset:
                 self.batches_dict[tree_footprint]["speedups_list"].append(sched_speedup)
                 self.nb_datapoints += 1
         
+        # Calculate the maximum length of an expression in the batch for padding later
         max_exprs = 0
         for tree_footprint in self.batches_dict:
             max_exprs = max([max([max([len(comp) for comp in function])
                                   for function in self.batches_dict[tree_footprint]["comps_expr_tree_list"]]), max_exprs])
             
+        # Adding padding to the smaller expressions in the batch and calculating the lengths of exprs vector
         for tree_footprint in self.batches_dict:
             lengths = []
             for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
@@ -718,7 +726,7 @@ class Dataset:
                     lengths[i].append(len(
                         self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j]))
                     self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j].extend(
-                        [[0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
+                        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
                 self.batches_dict[tree_footprint]["comps_expr_tree_list"][i] = torch.tensor(
                     [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]])
             self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"] = torch.tensor(
@@ -969,8 +977,8 @@ def sched_json_to_sched_str(sched_json):
         return sched_json["sched_str"]
     
     orig_loop_nest = []
-    orig_loop_nest.append(sched_json["tree_structure"]["loop_name"])
-    child_list = sched_json["tree_structure"]["child_list"]
+    orig_loop_nest.append(sched_json["tree_structure"]["roots"][0]["loop_name"])
+    child_list = sched_json["tree_structure"]["roots"][0]["child_list"]
     
     while len(child_list) > 0:
         child_loop = child_list[0]
@@ -1520,8 +1528,8 @@ def get_comp_iterators_from_tree_struct(schedule_json, comp_name):
     tree = schedule_json["tree_structure"]
     level = tree
     iterators = []
-    to_explore = []
-    to_explore.append(tree)
+    to_explore = [root for root in tree["roots"]]
+    # to_explore.append(tree)
     while(to_explore):
         level = to_explore.pop(0)
         if(comp_name in get_involved_comps(level)):
@@ -1531,29 +1539,41 @@ def get_comp_iterators_from_tree_struct(schedule_json, comp_name):
             to_explore.append(element)
     
     return iterators
-def get_expr_repr(expr):
+def get_expr_repr(expr, comp_type):
+        expr_vector = []
         if(expr == "add"):
-            return [1, 0, 0, 0, 0]
+            expr_vector = [1, 0, 0, 0, 0, 0, 0, 0]
         elif(expr == "sub"):
-            return [0, 1, 0, 0, 0]
+            expr_vector = [0, 1, 0, 0, 0, 0, 0, 0]
         elif(expr == "mul"):
-            return [0, 0, 1, 0, 0]
+            expr_vector = [0, 0, 1, 0, 0, 0, 0, 0]
         elif(expr == "div"):
-            return [0, 0, 0, 1, 0]
-        # elif(expr == "value"):
-        #     return [0, 0, 0, 0, 1, 0, 0, 0]
-        # elif(expr == "access"):
-        #     return [0, 0, 0, 0, 0, 1, 0, 0]
-        # elif(expr == "buffer"):
-        #     return [0, 0, 0, 0, 0, 0, 1, 0]
+            expr_vector = [0, 0, 0, 1, 0, 0, 0, 0]
+        elif(expr == "sqrt"):
+            expr_vector = [0, 0, 0, 0, 1, 0, 0, 0]
+        elif(expr == "min"):
+            expr_vector = [0, 0, 0, 0, 0, 1, 0, 0]
+        elif(expr == "max"):
+            expr_vector = [0, 0, 0, 1, 0, 0, 1, 0]
         else:
-            return [0, 0, 0, 0, 1]
-def get_tree_expr_repr(node):
+            expr_vector = [0, 0, 0, 1, 0, 0, 0, 1]
+        
+        comp_type_vector = []
+        if(comp_type == "int32"):
+            comp_type_vector = [1, 0, 0]
+        elif(comp_type == "float32"):
+            comp_type_vector = [0, 1, 0]
+        elif(comp_type == "float64"):
+            comp_type_vector = [0, 0, 1]
+            
+        return expr_vector.expand(comp_type_vector)
+
+def get_tree_expr_repr(node, comp_type):
         expr_tensor = []
         if node["children"] != []:
             for child_node in node["children"]:
-                expr_tensor.extend(get_tree_expr_repr(child_node))
-        expr_tensor.append(get_expr_repr(node["expr_type"]))
+                expr_tensor.extend(get_tree_expr_repr(child_node, comp_type))
+        expr_tensor.append(get_expr_repr(node["expr_type"], comp_type))
 
         return expr_tensor
     

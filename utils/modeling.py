@@ -1,25 +1,25 @@
 from unicodedata import bidirectional
 import torch
 from torch import nn
-
+from utils.data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
 #TODO seprate vectors when loading the data
 def seperate_vector(
-    X: torch.Tensor, num_matrices: int = 5, pad: bool = True, pad_amount: int = 5
+    X: torch.Tensor, num_transformations: int = 4, pad: bool = True, pad_amount: int = 5
 ) -> torch.Tensor:
     batch_size, _ = X.shape
-    first_part = X[:, :28]
-    second_part = X[:, 28 : 28 + 36 * num_matrices]
-    third_part = X[:, 28 + 36 * num_matrices :]
+    first_part = X[:, :33]
+    second_part = X[:, 33 : 33 + MAX_TAGS * num_transformations]
+    third_part = X[:, 33 + MAX_TAGS * num_transformations :]
     vectors = []
-    for i in range(num_matrices):
-        vector = second_part[:, 36 * i : 36 * (i + 1)].reshape(batch_size, 1, -1)
+    for i in range(num_transformations):
+        vector = second_part[:, MAX_TAGS * i : MAX_TAGS * (i + 1)].reshape(batch_size, 1, -1)
         vectors.append(vector)
 
     if pad:
         for i in range(pad_amount):
             vector = torch.zeros_like(vector)
             vectors.append(vector)
-    return (first_part, vectors[0], torch.cat(vectors[1:], dim=1), third_part)
+    return (first_part, torch.cat(vectors[0:], dim=1), third_part)
 
 # Define the architecture of our cost model
 class Model_Recursive_LSTM_v2(nn.Module):
@@ -31,7 +31,6 @@ class Model_Recursive_LSTM_v2(nn.Module):
         output_size=1,
         lstm_embedding_size=100,
         expr_embed_size=50,
-        transformation_matrix_dimension=6,
         loops_tensor_size=20,
         train_device="cpu",
         num_layers=1,
@@ -44,6 +43,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         concat_layer_sizes = [
             embedding_size * 2 + loops_tensor_size
         ] + comp_embed_layer_sizes[-2:]
+        
         comp_embed_layer_sizes = [
             input_size + lstm_embedding_size * (2 if bidirectional else 1) * num_layers + expr_embed_size
         ] + comp_embed_layer_sizes
@@ -78,8 +78,8 @@ class Model_Recursive_LSTM_v2(nn.Module):
             self.concat_dropouts.append(nn.Dropout(drops[i]))
         self.predict = nn.Linear(regression_layer_sizes[-1], output_size, bias=True)
         self.encode_vectors = nn.Linear(
-            transformation_matrix_dimension**2,
-            transformation_matrix_dimension**2,
+            MAX_TAGS,
+            MAX_TAGS,
             bias=True,
         )
         nn.init.xavier_uniform_(self.predict.weight)
@@ -98,7 +98,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
             comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         self.comps_embed = nn.LSTM(
-            transformation_matrix_dimension**2,
+            MAX_TAGS,
             lstm_embedding_size,
             batch_first=True,
             bidirectional=bidirectional,
@@ -160,8 +160,8 @@ class Model_Recursive_LSTM_v2(nn.Module):
         x = comps_tensor.to(self.train_device)
         batch_size, num_comps, __dict__ = x.shape
         x = x.view(batch_size * num_comps, -1)
-        (first_part, final_matrix, vectors, third_part) = seperate_vector(
-            x, num_matrices=6, pad=False
+        (first_part, vectors, third_part) = seperate_vector(
+            x, num_transformations=4, pad=False
         )
         vectors = self.encode_vectors(vectors)
         _, (prog_embedding, _) = self.comps_embed(vectors)
@@ -172,14 +172,13 @@ class Model_Recursive_LSTM_v2(nn.Module):
         x = torch.cat(
             (
                 first_part,
-                final_matrix.reshape(batch_size * num_comps, -1),
                 prog_embedding,
                 third_part,
                 expr_embedding,
             ),
             dim=1,
         ).view(batch_size, num_comps, -1)
-
+        
         for i in range(len(self.comp_embedding_layers)):
             x = self.comp_embedding_layers[i](x)
             x = self.comp_embedding_dropouts[i](self.ELU(x))

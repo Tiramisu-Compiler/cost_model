@@ -11,7 +11,7 @@ from tqdm import tqdm
 from utils.config import *
 from scipy.stats import spearmanr
 from sklearn.metrics import ndcg_score
-
+import enum
 # An exception to limit the maximum number of allowed transformations 
 class NbTranformationException(Exception):
     pass
@@ -33,6 +33,12 @@ MAX_NUM_TRANSFORMATIONS = 4
 # Maximum size of the tags vector representing each transformation
 MAX_TAGS = 8
 
+# Enumeration for the different exploration algorithms used to generate the data
+class Exploration_method(int, enum.Enum):
+   Beam_search = 0
+   Recursive_beam_search = 1
+   Reinforcement_learning = 2
+
 # Creates a template for the input representation
 def get_representation_template(program_dict, max_depth, train_device="cpu"):
     # Set the max and min number of accesses allowed 
@@ -40,6 +46,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     min_accesses = 1
 
     comps_repr_templates_list = []
+    comps_expr_repr_templates_list = []
     comps_indices_dict = dict()
     comps_placeholders_indices_dict = dict()
 
@@ -170,7 +177,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
             if isinstance(element, str):
                 comps_placeholders_indices_dict[element] = (comp_index, j)
             
-            
+        
     # Create a representation of the loops independantly from the computations
     loops_repr_templates_list = []
     loops_indices_dict = dict()
@@ -973,7 +980,7 @@ def sched_json_to_sched_str(sched_json):
     comp_name = [
         n
         for n in sched_json.keys()
-        if not n in ["unfuse_iterators", "tree_structure", "execution_times"]
+        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
     ][0]
     schedule = sched_json[comp_name]
     transf_loop_nest = orig_loop_nest
@@ -1549,3 +1556,204 @@ def get_tree_expr_repr(node):
         expr_tensor.append(get_expr_repr(node["expr_type"]))
 
         return expr_tensor
+    
+def get_padded_initial_constrain_matrix(nb_iterators, max_depth):
+    result = []
+    for i in range(nb_iterators):
+        for j in range(2):
+            if j == 0 :
+                result.append(format_bound(i, nb_iterators, True))
+            else:
+                result.append(format_bound(i, nb_iterators, False))
+#     print(result)
+#     print(len(result))
+    result = np.c_[np.ones(len(result)), result]
+    result = np.r_[[np.ones(len(result[0]))], result]
+    result = np.pad(
+        result,
+        [
+            (0, (max_depth + 1)*2 - result.shape[0]),
+            (0, max_depth + 1 - result.shape[1]),
+        ],
+        mode="constant",
+        constant_values=0,
+    )
+    return result
+def get_padded_transformed_constrain_matrix(nb_iterators, max_depth, transformation_matrix):
+    result = []
+    for i in range(nb_iterators):
+        for j in range(2):
+            if j == 0 :
+                result.append(format_bound(i, nb_iterators, True))
+            else:
+                result.append(format_bound(i, nb_iterators, False))
+    inverse = np.linalg.inv(transformation_matrix)
+    result = np.matmul(result, inverse)
+    
+    result = np.c_[np.ones(len(result)), result]
+    result = np.r_[[np.ones(len(result[0]))], result]
+    result = np.pad(
+        result,
+        [
+            (0, (max_depth + 1)*2 - result.shape[0]),
+            (0, max_depth + 1 - result.shape[1]),
+        ],
+        mode="constant",
+        constant_values=0,
+    )
+#     print(transformation_matrix)
+#     print(result)
+    return result
+
+def format_bound(id_rank, size, is_lower):
+    output = []
+    for i in range(size):
+        if i == id_rank:
+            if is_lower :
+                output.append(-1)
+            else:
+                output.append(1)
+        else:
+            output.append(0)
+    return output
+def get_trasnformation_matrix_from_vector(transformation, matrix_size):
+    matrix = np.identity(matrix_size)
+    
+    if (transformation[0] == 1):
+        assert(transformation[1] < matrix_size and transformation[2] < matrix_size)
+        matrix[transformation[1], transformation[2]] = 1
+        matrix[transformation[1], transformation[1]] = 0
+        matrix[transformation[2], transformation[1]] = 1
+        matrix[transformation[2], transformation[2]] = 0
+        
+    elif (transformation[0] == 2):
+        assert(transformation[3] < matrix_size)
+        matrix[transformation[3], transformation[3]] = -1
+        
+    elif (transformation[0] == 3):
+        assert(transformation[4] < matrix_size and transformation[5] < matrix_size)
+        matrix[transformation[4], transformation[4]] = transformation[6]
+        matrix[transformation[4], transformation[5]] = transformation[7]
+    
+    return matrix
+# transform the vectors into a series of matrices
+def get_transformation_matrix(
+    program_json, schedule_json, comp_name, max_depth=None
+):
+    nb_iterators = len(program_json["computations"][comp_name]["iterators"])
+    final_transformation = np.identity(nb_iterators)
+    for transformation in schedule_json[comp_name]["transformations_list"]:
+        matrix = get_trasnformation_matrix_from_vector(transformation, nb_iterators)
+        final_transformation = np.matmul(matrix, final_transformation)
+    return final_transformation
+
+def sched_updated_json(program_json, sched_json):
+    comp_name = [
+        n
+        for n in sched_json.keys()
+        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
+    ]
+    sched_str = ""
+    
+    if ("fusions" in sched_json and sched_json["fusions"]):
+        for fusion in sched_json["fusions"]:
+            sched_str += "F("
+            for name in comp_name:
+                if name in fusion:
+                    sched_str += name + ","
+            
+            sched_str = sched_str[:-1]
+            sched_str += ")"
+            
+    for name in comp_name:
+        transf_loop_nest = get_original_iterators(program_json)
+        schedule = sched_json[name]
+        sched_str += '{' + name + '}:'
+
+        for transformation in schedule["transformations_list"]:
+
+            if (transformation[0] == 1):
+                sched_str += "I(L" + str(transformation[1]) + ",L" + str(transformation[2]) + ")"
+                
+            elif (transformation[0] == 2):
+                sched_str += "R(L" + str(transformation[3])+ ")"
+            elif (transformation[0] == 3):
+                sched_str += "S(L" + str(transformation[4]) + ",L" + str(transformation[5]) + "," + str(transformation[6]) + "," + str(transformation[7]) + ")"
+                
+        if schedule["parallelized_dim"]:
+            
+            dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
+            sched_str += "P(L" + str(dim_index) + ")"
+
+        if schedule["tiling"]:
+            if schedule["tiling"]["tiling_depth"] == 2:
+                first_dim = schedule["tiling"]["tiling_dims"][0]
+                second_dim = schedule["tiling"]["tiling_dims"][1]
+                
+                first_dim_index = transf_loop_nest.index(first_dim)
+                second_dim_index = transf_loop_nest.index(second_dim)
+                first_factor = schedule["tiling"]["tiling_factors"][0]
+                second_factor = schedule["tiling"]["tiling_factors"][1]
+                sched_str += (
+                    "T2(L"
+                    + str(first_dim_index)
+                    + ",L"
+                    + str(second_dim_index)
+                    + ","
+                    + str(first_factor)
+                    + ","
+                    + str(second_factor)
+                    + ")"
+                )
+                i = transf_loop_nest.index(first_dim)
+                transf_loop_nest[i : i + 1] = first_dim + "_outer", second_dim + "_outer"
+                i = transf_loop_nest.index(second_dim)
+                transf_loop_nest[i : i + 1] = first_dim + "_inner", second_dim + "_inner"
+            else:
+                first_dim = schedule["tiling"]["tiling_dims"][0]
+                second_dim = schedule["tiling"]["tiling_dims"][1]
+                third_dim = schedule["tiling"]["tiling_dims"][2]
+                first_dim_index = transf_loop_nest.index(first_dim)
+                second_dim_index = transf_loop_nest.index(second_dim)
+                third_dim_index = transf_loop_nest.index(third_dim)
+                first_factor = schedule["tiling"]["tiling_factors"][0]
+                second_factor = schedule["tiling"]["tiling_factors"][1]
+                third_factor = schedule["tiling"]["tiling_factors"][2]
+                sched_str += (
+                    "T3(L"
+                    + str(first_dim_index)
+                    + ",L"
+                    + str(second_dim_index)
+                    + ",L"
+                    + str(third_dim_index)
+                    + ","
+                    + str(first_factor)
+                    + ","
+                    + str(second_factor)
+                    + ","
+                    + str(third_factor)
+                    + ")"
+                )
+                i = transf_loop_nest.index(first_dim)
+                transf_loop_nest[i : i + 1] = (
+                    first_dim + "_outer",
+                    second_dim + "_outer",
+                    third_dim + "_outer",
+                )
+                i = transf_loop_nest.index(second_dim)
+                transf_loop_nest[i : i + 1] = (
+                    first_dim + "_inner",
+                    second_dim + "_inner",
+                    third_dim + "_inner",
+                )
+                transf_loop_nest.remove(third_dim)
+
+        if schedule["unrolling_factor"]:
+            dim_index = len(transf_loop_nest) - 1
+            dim_name = transf_loop_nest[-1]
+            sched_str += "U(L" + str(dim_index) + "," + schedule["unrolling_factor"] + ")"
+            transf_loop_nest[dim_index : dim_index + 1] = (
+                dim_name + "_Uouter",
+                dim_name + "_Uinner",
+            )
+    return sched_str

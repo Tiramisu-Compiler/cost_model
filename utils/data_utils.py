@@ -250,7 +250,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
 def update_tree_atributes(node, loops_indices_dict, comps_indices_dict, train_device="cpu"):
         if "roots" in node :
             for root in node["roots"]:
-                update_tree_atributes(root, train_device=train_device)
+                update_tree_atributes(root, loops_indices_dict, comps_indices_dict, train_device=train_device)
             return node
 
         node["loop_index"] = torch.tensor(loops_indices_dict[node["loop_name"]]).to(
@@ -837,6 +837,12 @@ class Dataset:
     
 # Returns a representation of the tree structure of the program
 def get_tree_footprint(tree):
+    if "roots" in tree :
+        footprint = "<R>"
+        for root in tree["roots"]:
+            footprint += get_tree_footprint(root)
+        footprint += "</R>"
+        return footprint
     footprint = "<L" + str(int(tree["loop_index"])) + ">"
     if tree["has_comps"]:
         footprint += "["
@@ -1566,7 +1572,7 @@ def get_expr_repr(expr, comp_type):
         elif(comp_type == "float64"):
             comp_type_vector = [0, 0, 1]
             
-        return expr_vector.expand(comp_type_vector)
+        return expr_vector + comp_type_vector
 
 def get_tree_expr_repr(node, comp_type):
         expr_tensor = []

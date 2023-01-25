@@ -126,7 +126,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
                     comps_embeddings.shape[0], -1, -1
                 )
             selected_loop_tensor = torch.unsqueeze(self.root_iterator, 0).expand(
-                    1, -1, -1
+                    comps_embeddings.shape[0], -1, -1
                 )
         else:
             for n in node["child_list"]:

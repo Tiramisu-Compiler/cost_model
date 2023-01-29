@@ -91,6 +91,9 @@ class Model_Recursive_LSTM_v2(nn.Module):
         self.no_nodes_tensor = nn.Parameter(
             nn.init.xavier_uniform_(torch.zeros(1, embedding_size))
         )
+        self.root_iterator = nn.Parameter(
+                nn.init.xavier_uniform_(torch.zeros(1, loops_tensor_size))
+            )
         self.comps_lstm = nn.LSTM(
             comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
@@ -105,36 +108,53 @@ class Model_Recursive_LSTM_v2(nn.Module):
             num_layers=num_layers,
         )
         self.exprs_embed = nn.LSTM(
-            5,
+            11,
             expr_embed_size,
             batch_first=True,
         )
 
     def get_hidden_state(self, node, comps_embeddings, loops_tensor):
         nodes_list = []
-        for n in node["child_list"]:
-            nodes_list.append(self.get_hidden_state(n, comps_embeddings, loops_tensor))
-        if nodes_list != []:
+        if "roots" in node:
+            for root in node["roots"]:
+                nodes_list.append(self.get_hidden_state(
+                    root, comps_embeddings, loops_tensor))
             nodes_tensor = torch.cat(nodes_list, 1)
             lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
             nodes_h_n = nodes_h_n.permute(1, 0, 2)
-        else:
-            nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
-                comps_embeddings.shape[0], -1, -1
-            )
-        if node["has_comps"]:
-            selected_comps_tensor = torch.index_select(
-                comps_embeddings, 1, node["computations_indices"].to(self.train_device)
-            )
-            lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(selected_comps_tensor)
-            comps_h_n = comps_h_n.permute(1, 0, 2)
-        else:
             comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
-                comps_embeddings.shape[0], -1, -1
+                    comps_embeddings.shape[0], -1, -1
+                )
+            selected_loop_tensor = torch.unsqueeze(self.root_iterator, 0).expand(
+                    comps_embeddings.shape[0], -1, -1
+                )
+        else:
+            for n in node["child_list"]:
+                nodes_list.append(self.get_hidden_state(
+                    n, comps_embeddings, loops_tensor))
+            if nodes_list != []:
+                nodes_tensor = torch.cat(nodes_list, 1)
+                lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
+                nodes_h_n = nodes_h_n.permute(1, 0, 2)
+            else:
+                nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
+                    comps_embeddings.shape[0], -1, -1
+                )
+            if node["has_comps"]:
+                selected_comps_tensor = torch.index_select(
+                    comps_embeddings, 1, node["computations_indices"].to(
+                        self.train_device)
+                )
+                lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
+                    selected_comps_tensor)
+                comps_h_n = comps_h_n.permute(1, 0, 2)
+            else:
+                comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
+                    comps_embeddings.shape[0], -1, -1
+                )
+            selected_loop_tensor = torch.index_select(
+                loops_tensor, 1, node["loop_index"].to(self.train_device)
             )
-        selected_loop_tensor = torch.index_select(
-            loops_tensor, 1, node["loop_index"].to(self.train_device)
-        )
         x = torch.cat((nodes_h_n, comps_h_n, selected_loop_tensor), 2)
         for i in range(len(self.concat_layers)):
             x = self.concat_layers[i](x)

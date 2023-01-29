@@ -162,7 +162,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         return x
 
     def forward(self, tree_tensors):
-        tree, comps_tensor, loops_tensor, functions_comps_expr_tree, exprs_lengths = tree_tensors
+        tree, comps_tensor_first_part, comps_tensor_vectors, comps_tensor_third_part, loops_tensor, functions_comps_expr_tree, exprs_lengths = tree_tensors
         
         # expressions embedding layer
         x = functions_comps_expr_tree.to(self.train_device)
@@ -177,12 +177,16 @@ class Model_Recursive_LSTM_v2(nn.Module):
         )
         
         # computation embbedding layer
-        x = comps_tensor.to(self.train_device)
-        batch_size, num_comps, __dict__ = x.shape
-        x = x.view(batch_size * num_comps, -1)
-        (first_part, vectors, third_part) = seperate_vector(
-            x, num_transformations=4, pad=False
-        )
+        # x = comps_tensor.to(self.train_device)
+        batch_size, num_comps, __dict__ = comps_tensor_first_part.shape
+        # x = x.view(batch_size * num_comps, -1)
+        # (first_part, vectors, third_part) = seperate_vector(
+        #     x, num_transformations=4, pad=False
+        # )
+        first_part = comps_tensor_first_part.to(self.train_device).view(batch_size * num_comps, -1)
+        vectors = comps_tensor_vectors.to(self.train_device) # it's shape is (batch_size * num_comps, number of vectors)
+        third_part = comps_tensor_third_part.to(self.train_device).view(batch_size * num_comps, -1)
+        
         vectors = self.encode_vectors(vectors)
         _, (prog_embedding, _) = self.comps_embed(vectors)
 

@@ -805,11 +805,20 @@ class Dataset:
                         chunk : chunk + max_batch_size
                     ]
                 )
+                # Here we separate the comps tensor to get the transformation vectors
+                x = torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device)
+                batch_size, num_comps, __dict__ = x.shape
+                x = x.view(batch_size * num_comps, -1)
+                (first_part, vectors, third_part) = seperate_vector(
+                    x, num_transformations=4, pad=False
+                )
                 self.batched_X.append(
                     (
                         self.batches_dict[tree_footprint]["tree"],
-                        
-                        torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
+                        first_part.to(storing_device).view(batch_size, num_comps, -1),
+                        vectors.to(storing_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
+                        third_part.to(storing_device).view(batch_size, num_comps, -1),
+                        #torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
                         
                         torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
                         torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
@@ -1738,3 +1747,21 @@ def get_schedule_str(program_json, sched_json):
                 dim_name + "_Uinner",
             )
     return sched_str
+
+def seperate_vector(
+    X: torch.Tensor, num_transformations: int = 4, pad: bool = True, pad_amount: int = 5
+) -> torch.Tensor:
+    batch_size, _ = X.shape
+    first_part = X[:, :33]
+    second_part = X[:, 33 : 33 + MAX_TAGS * num_transformations]
+    third_part = X[:, 33 + MAX_TAGS * num_transformations :]
+    vectors = []
+    for i in range(num_transformations):
+        vector = second_part[:, MAX_TAGS * i : MAX_TAGS * (i + 1)].reshape(batch_size, 1, -1)
+        vectors.append(vector)
+
+    if pad:
+        for i in range(pad_amount):
+            vector = torch.zeros_like(vector)
+            vectors.append(vector)
+    return (first_part, torch.cat(vectors[0:], dim=1), third_part)

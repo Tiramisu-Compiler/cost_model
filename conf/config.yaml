@@ -1,0 +1,46 @@
+experiment:
+    name: "bidirectional_static_input_nn"
+    base_path: "/data/kb4083/model_release/release_code"
+
+# /data/kb4083/datasets/sample_20m_test.pkl
+# /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
+# /data/mm12191/datasets/benchmarks_mats1.pkl
+data_generation:
+    train_dataset_file: "/data/kb4083/datasets/dataset_expr_batch550000-838143_cleaned_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/dataset_expr_batch550000-838143_cleaned_val.pkl"
+    benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
+    dataset_name:  "dataset_factorization"
+    batch_size: 1024
+
+
+training: 
+    log_file: "logs.txt" # Just the name
+    lr: 0.001
+    max_epochs: 500
+
+testing:
+    datasets: # choose from valid, bench.
+        # - valid
+        - bench
+    checkpoint: "best_model.pt"
+
+wandb:
+    use_wandb: True
+    project: "recursive_lstm"
+    
+model: 
+    input_size: 880
+    comp_embed_layer_sizes:
+        - 600
+        - 350
+        - 200
+        - 180
+    drops:
+        - 0.050
+        - 0.050
+        - 0.050
+        - 0.050
+        - 0.050
+
+defaults:
+  - override hydra/job_logging: disabled

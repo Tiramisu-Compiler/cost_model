@@ -50,7 +50,7 @@ def generate_datasets(conf):
         max_batch_size=conf.data_generation.batch_size,
         drop_sched_func=drop_schedule,
         drop_prog_func=drop_program,
-        default_eval=default_eval,
+        default_eval=can_set_default_eval,
         speedups_clip_func=speedup_clip,
     )
     validation_dataset_path = os.path.join(conf.experiment.base_path, "dataset/valid")
@@ -73,7 +73,7 @@ def generate_datasets(conf):
         max_batch_size=conf.data_generation.batch_size,
         drop_sched_func=drop_schedule,
         drop_prog_func=drop_program,
-        default_eval=default_eval,
+        default_eval=can_set_default_eval,
         speedups_clip_func=speedup_clip,
     )
 

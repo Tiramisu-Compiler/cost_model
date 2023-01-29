@@ -34,10 +34,10 @@ MAX_NUM_TRANSFORMATIONS = 4
 MAX_TAGS = 8
 
 # Enumeration for the different exploration algorithms used to generate the data
-class Exploration_method(int, enum.Enum):
-   Beam_search = 0
-   Recursive_beam_search = 1
-   Reinforcement_learning = 2
+# class Exploration_method(int, enum.Enum):
+#    Beam_search = 0
+#    Recursive_beam_search = 1
+#    Reinforcement_learning = 2
 
 # Creates a template for the input representation
 def get_representation_template(program_dict, max_depth, train_device="cpu"):
@@ -585,7 +585,6 @@ class Dataset:
         # shuffle the programs of the dataset
         functions_list = list(self.programs_dict.keys())
         random.Random(42).shuffle(functions_list)
-        
         for index, function_name in enumerate(tqdm(functions_list)):
             # Check whether this function should be dropped
             if drop_prog_func(self.programs_dict[function_name], function_name):
@@ -653,7 +652,7 @@ class Dataset:
                 sched_speedup = program_exec_time / sched_exec_time
 
                 # Check whether we can set a default value for this speedup through the can_set_default_eval function.
-                def_sp = can_set_default_eval(self.programs_dict[function_name], schedule_index)
+                def_sp = can_set_default_eval(self.programs_dict[function_name]["program_annotation"], schedule_json)
                 
                 
                 # If the function returns 0, this means no default value was spesified
@@ -944,7 +943,7 @@ def get_padded_transformation_tags(
 def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footprint):
     schedule_json = program_dict["schedules_list"][schedule_index]
     sched_id = str(schedule_index).zfill(4)
-    sched_str = sched_json_to_sched_str(schedule_json)
+    sched_str = get_schedule_str(program_dict["program_annotation"], schedule_json)
     exec_time = np.min(schedule_json["execution_times"])
     memory_use = program_dict["program_annotation"]["memory_size"]
     node_name = program_dict["node_name"] if "node_name" in program_dict else "unknown"
@@ -961,140 +960,6 @@ def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footp
         speedup,
     )
 
-# returns a string representation of a schedule and the transformations applied in it
-def sched_json_to_sched_str(sched_json):
-    
-    # If the string representation is already in the dataset nothing needs to be done
-    if "sched_str" in sched_json:
-        return sched_json["sched_str"]
-    
-    orig_loop_nest = []
-    orig_loop_nest.append(sched_json["tree_structure"]["loop_name"])
-    child_list = sched_json["tree_structure"]["child_list"]
-    
-    while len(child_list) > 0:
-        child_loop = child_list[0]
-        orig_loop_nest.append(child_loop["loop_name"])
-        child_list = child_loop["child_list"]
-    
-    comp_name = [
-        n
-        for n in sched_json.keys()
-        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
-    ][0]
-    schedule = sched_json[comp_name]
-    transf_loop_nest = orig_loop_nest
-    sched_str = ""
-    
-    #TODO fix this in the dataset
-    if "Transformation Matrix" in schedule:
-        if schedule["Transformation Matrix"]:
-            sched_str += "M(" + ",".join(schedule["Transformation Matrix"]) + ")"
-    
-    elif "transformation_matrix" in schedule:
-        if schedule["transformation_matrix"]:
-            sched_str += "M(" + ",".join(schedule["transformation_matrix"]) + ")"
-            
-    if schedule["interchange_dims"]:
-        first_dim_index = transf_loop_nest.index(schedule["interchange_dims"][0])
-        second_dim_index = transf_loop_nest.index(schedule["interchange_dims"][1])
-        sched_str += "I(L" + str(first_dim_index) + ",L" + str(second_dim_index) + ")"
-        transf_loop_nest[first_dim_index], transf_loop_nest[second_dim_index] = (
-            transf_loop_nest[second_dim_index],
-            transf_loop_nest[first_dim_index],
-        )
-    if schedule["skewing"]:
-        first_dim_index = transf_loop_nest.index(schedule["skewing"]["skewed_dims"][0])
-        second_dim_index = transf_loop_nest.index(schedule["skewing"]["skewed_dims"][1])
-        first_factor = schedule["skewing"]["skewing_factors"][0]
-        second_factor = schedule["skewing"]["skewing_factors"][1]
-        sched_str += (
-            "S(L"
-            + str(first_dim_index)
-            + ",L"
-            + str(second_dim_index)
-            + ","
-            + str(first_factor)
-            + ","
-            + str(second_factor)
-            + ")"
-        )
-    if schedule["parallelized_dim"]:
-        dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
-        sched_str += "P(L" + str(dim_index) + ")"
-        
-    if schedule["tiling"]:
-        if schedule["tiling"]["tiling_depth"] == 2:
-            first_dim = schedule["tiling"]["tiling_dims"][0]
-            second_dim = schedule["tiling"]["tiling_dims"][1]
-            first_dim_index = transf_loop_nest.index(first_dim)
-            second_dim_index = transf_loop_nest.index(second_dim)
-            first_factor = schedule["tiling"]["tiling_factors"][0]
-            second_factor = schedule["tiling"]["tiling_factors"][1]
-            sched_str += (
-                "T2(L"
-                + str(first_dim_index)
-                + ",L"
-                + str(second_dim_index)
-                + ","
-                + str(first_factor)
-                + ","
-                + str(second_factor)
-                + ")"
-            )
-            i = transf_loop_nest.index(first_dim)
-            transf_loop_nest[i : i + 1] = first_dim + "_outer", second_dim + "_outer"
-            i = transf_loop_nest.index(second_dim)
-            transf_loop_nest[i : i + 1] = first_dim + "_inner", second_dim + "_inner"
-        else:
-            first_dim = schedule["tiling"]["tiling_dims"][0]
-            second_dim = schedule["tiling"]["tiling_dims"][1]
-            third_dim = schedule["tiling"]["tiling_dims"][2]
-            first_dim_index = transf_loop_nest.index(first_dim)
-            second_dim_index = transf_loop_nest.index(second_dim)
-            third_dim_index = transf_loop_nest.index(third_dim)
-            first_factor = schedule["tiling"]["tiling_factors"][0]
-            second_factor = schedule["tiling"]["tiling_factors"][1]
-            third_factor = schedule["tiling"]["tiling_factors"][2]
-            sched_str += (
-                "T3(L"
-                + str(first_dim_index)
-                + ",L"
-                + str(second_dim_index)
-                + ",L"
-                + str(third_dim_index)
-                + ","
-                + str(first_factor)
-                + ","
-                + str(second_factor)
-                + ","
-                + str(third_factor)
-                + ")"
-            )
-            i = transf_loop_nest.index(first_dim)
-            transf_loop_nest[i : i + 1] = (
-                first_dim + "_outer",
-                second_dim + "_outer",
-                third_dim + "_outer",
-            )
-            i = transf_loop_nest.index(second_dim)
-            transf_loop_nest[i : i + 1] = (
-                first_dim + "_inner",
-                second_dim + "_inner",
-                third_dim + "_inner",
-            )
-            transf_loop_nest.remove(third_dim)
-            
-    if schedule["unrolling_factor"]:
-        dim_index = len(transf_loop_nest) - 1
-        dim_name = transf_loop_nest[-1]
-        sched_str += "U(L" + str(dim_index) + "," + schedule["unrolling_factor"] + ")"
-        transf_loop_nest[dim_index : dim_index + 1] = (
-            dim_name + "_Uouter",
-            dim_name + "_Uinner",
-        )
-
-    return sched_str
 
 def pad_access_matrix(access_matrix, max_depth):
     access_matrix = np.array(access_matrix)
@@ -1340,30 +1205,53 @@ def has_skippable_loop_1comp(
 
     return True
 
-#TODO
-def sched_is_prunable_1comp(schedule_str, prog_depth):
-    if re.search("P\(L2\)U\(L3,\d+\)", schedule_str):
+
+def sched_is_prunable(program_json, schedule_json):
+    reg = ""
+    comp_names = [
+        n
+        for n in schedule_json.keys()
+        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
+    ]
+    for name in comp_names:
+        innermost_loop = len(program_json["computations"][name]["iterators"])-1
+        reg += f"{{{name}}}:P\(L{innermost_loop}\)U.*|"
+    if(len(comp_names)>0):
+        reg = reg[:-1]
+    
+    schedule_str = get_schedule_str_for_pruning(program_json, schedule_json)
+    if re.search(reg, schedule_str):
         return True
-    if prog_depth == 2:
-        if re.search("P\(L1\)(?:[^T]|$)", schedule_str):
-            return True
-    if prog_depth == 3:
-        if re.search("P\(L2\)(?:[^T]|$|T2\(L0,L1)", schedule_str):
-            return True
+    reg = ""
+    
+    for name in comp_names:
+        innermost_loop = len(program_json["computations"][name]["iterators"])-1
+        reg += f"{{{name}}}:P\(L{innermost_loop}\)T2\(L{innermost_loop-2},L{innermost_loop-1}.*|"
+    
+    if(len(comp_names)>0):
+        reg = reg[:-1]
+    if re.search(reg, schedule_str):
+        return True                                                                                                                               
     return False
 
-#TODO
-def can_set_default_eval_1comp(schedule_str, prog_depth):
-    def_sp = 0
-
-    if prog_depth == 2:
-        if re.search("P\(L1\)$", schedule_str):
-            def_sp = 0.001
-    if prog_depth == 3:
-        if re.search("P\(L2\)$", schedule_str):
-            def_sp = 0.001
-    return def_sp
-
+def can_set_default_eval(program_json, schedule_json):
+    reg = ""
+    comp_names = [
+        n
+        for n in schedule_json.keys()
+        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
+    ]
+    for name in comp_names:
+        innermost_loop = len(program_json["computations"][name]["iterators"])-1
+        reg += f"{{{name}}}:P\(L{innermost_loop}\)({{|$)|"
+    if(len(comp_names)>0):
+        reg = reg[:-1]
+    
+    schedule_str = get_schedule_str_for_pruning(program_json, schedule_json)
+    if re.search(reg, schedule_str):    
+        return True
+    
+    return False
 
 def access_is_stencil(access):
     return np.any(access["access_matrix"], axis=0)[-1]
@@ -1415,41 +1303,13 @@ def linear_diophantine_default(f_i, f_j):
             gamma = ((sigma * f_i) - 1) / f_j
     return gamma, sigma
 
-#TODO
-def wrongly_pruned_schedule(program_dict, schedule_index):
+def wrongly_set_to_default_schedule(program_dict, schedule_index):
+    
     schedule_dict = program_dict["schedules_list"][schedule_index]
-    if not "sched_str" in schedule_dict:
-        return False
-    sched_str = schedule_dict["sched_str"]
-    if schedule_dict["execution_times"] == None:
-        return False
     if len(schedule_dict["execution_times"]) == 1:
-        depths = []
-        target = (
-            program_dict["initial_execution_time"] / schedule_dict["execution_times"][0]
-        )
-        if target > 0.00097 and target < 0.00103:
-            for depth in program_dict["program_annotation"]["computations"]:
-                depths.append(
-                    len(
-                        program_dict["program_annotation"]["computations"][depth][
-                            "iterators"
-                        ]
-                    )
-                )
-            reg_str = ""
-            for j in reversed(range(len(depths))):
-                for i in range(depths[j] - 1):
-                    reg_str += (
-                        ".*P\(\{(C[0-9],)*C"
-                        + str(j)
-                        + "(,C[0-9])*\},L"
-                        + str(i)
-                        + "\)$|"
-                    )
-            reg_str = reg_str[:-1]
-            if re.search(reg_str, sched_str):
-
+        speed_up = program_dict["initial_execution_time"] / schedule_dict["execution_times"][0]
+        
+        if (speed_up > 0.00099 and speed_up < 0.00101) and (not can_set_default_eval(program_dict["program_annotation"], schedule_dict)):
                 return True
     return False
 
@@ -1466,7 +1326,7 @@ def drop_program(prog_dict, prog_name):
         return True
     if ( 750000 <= int(prog_name[8:]) and int(prog_name[8:])<=752600 ):
     
-        print("Found an random matrix program", prog_name)
+#         print("Found an random matrix program", prog_name)
         return True
     if has_skippable_loop_1comp(prog_dict):
         return True
@@ -1476,36 +1336,19 @@ def drop_program(prog_dict, prog_name):
         return True
     return False
 
-#TODO
 def drop_schedule(prog_dict, schedule_index):
     schedule_json = prog_dict["schedules_list"][schedule_index]
-    schedule_str = sched_json_to_sched_str(schedule_json)
-    program_depth = len(prog_dict["program_annotation"]["iterators"])
     if (not schedule_json["execution_times"]) or min(
         schedule_json["execution_times"]
     ) < 0:  # exec time is set to -1 on datapoints that are deemed noisy, or if list empty
         return True
-    if (
-        len(prog_dict["program_annotation"]["computations"]) == 1
-    ):  # this function works only on single comp programs
-        if sched_is_prunable_1comp(schedule_str, program_depth):
+    if sched_is_prunable(prog_dict["program_annotation"], schedule_json):
             return True
-    if wrongly_pruned_schedule(prog_dict, schedule_index):
+    if wrongly_set_to_default_schedule(prog_dict, schedule_index):
         return True
 
     return False
 
-#TODO
-def default_eval(prog_dict, schedule_index):
-    schedule_json = prog_dict["schedules_list"][schedule_index]
-    schedule_str = sched_json_to_sched_str(schedule_json)
-    program_depth = len(prog_dict["program_annotation"]["iterators"])
-    if (
-        len(prog_dict["program_annotation"]["computations"]) == 1
-    ):  # this function works only on single comp programs
-        return can_set_default_eval_1comp(schedule_str, program_depth)
-    else:
-        return 0
 def get_involved_comps(node):
         result = []
         if(len(node)==0): 
@@ -1647,7 +1490,99 @@ def get_transformation_matrix(
         final_transformation = np.matmul(matrix, final_transformation)
     return final_transformation
 
-def sched_updated_json(program_json, sched_json):
+def get_schedule_str_for_pruning(program_json, sched_json):
+    comp_name = [
+        n
+        for n in sched_json.keys()
+        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
+    ]
+    sched_str = ""
+#     print(f"starting for new schedules in program: {program_json}")
+    for name in comp_name:
+        # can probably use the feature in prog json
+        transf_loop_nest = program_json["computations"][name]["iterators"].copy()
+        schedule = sched_json[name]
+        sched_str += '{' + name + '}:'
+#         print(f"transf_loop_nest for computation: {name} is {transf_loop_nest}")
+        if schedule["parallelized_dim"]:
+            
+            dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
+            sched_str += "P(L" + str(dim_index) + ")"
+
+        if schedule["tiling"]:
+            if schedule["tiling"]["tiling_depth"] == 2:
+                first_dim = schedule["tiling"]["tiling_dims"][0]
+                second_dim = schedule["tiling"]["tiling_dims"][1]
+                
+                first_dim_index = transf_loop_nest.index(first_dim)
+                second_dim_index = transf_loop_nest.index(second_dim)
+                first_factor = schedule["tiling"]["tiling_factors"][0]
+                second_factor = schedule["tiling"]["tiling_factors"][1]
+                sched_str += (
+                    "T2(L"
+                    + str(first_dim_index)
+                    + ",L"
+                    + str(second_dim_index)
+                    + ","
+                    + str(first_factor)
+                    + ","
+                    + str(second_factor)
+                    + ")"
+                )
+                i = transf_loop_nest.index(first_dim)
+                transf_loop_nest[i : i + 1] = first_dim + "_outer", second_dim + "_outer"
+                i = transf_loop_nest.index(second_dim)
+                transf_loop_nest[i : i + 1] = first_dim + "_inner", second_dim + "_inner"
+            else:
+                first_dim = schedule["tiling"]["tiling_dims"][0]
+                second_dim = schedule["tiling"]["tiling_dims"][1]
+                third_dim = schedule["tiling"]["tiling_dims"][2]
+                first_dim_index = transf_loop_nest.index(first_dim)
+                second_dim_index = transf_loop_nest.index(second_dim)
+                third_dim_index = transf_loop_nest.index(third_dim)
+                first_factor = schedule["tiling"]["tiling_factors"][0]
+                second_factor = schedule["tiling"]["tiling_factors"][1]
+                third_factor = schedule["tiling"]["tiling_factors"][2]
+                sched_str += (
+                    "T3(L"
+                    + str(first_dim_index)
+                    + ",L"
+                    + str(second_dim_index)
+                    + ",L"
+                    + str(third_dim_index)
+                    + ","
+                    + str(first_factor)
+                    + ","
+                    + str(second_factor)
+                    + ","
+                    + str(third_factor)
+                    + ")"
+                )
+                i = transf_loop_nest.index(first_dim)
+                transf_loop_nest[i : i + 1] = (
+                    first_dim + "_outer",
+                    second_dim + "_outer",
+                    third_dim + "_outer",
+                )
+                i = transf_loop_nest.index(second_dim)
+                transf_loop_nest[i : i + 1] = (
+                    first_dim + "_inner",
+                    second_dim + "_inner",
+                    third_dim + "_inner",
+                )
+                transf_loop_nest.remove(third_dim)
+
+        if schedule["unrolling_factor"]:
+            dim_index = len(transf_loop_nest) - 1
+            dim_name = transf_loop_nest[-1]
+            sched_str += "U(L" + str(dim_index) + "," + schedule["unrolling_factor"] + ")"
+            transf_loop_nest[dim_index : dim_index + 1] = (
+                dim_name + "_Uouter",
+                dim_name + "_Uinner",
+            )
+    return sched_str
+# returns a string representation of a schedule and the transformations applied in it
+def get_schedule_str(program_json, sched_json):
     comp_name = [
         n
         for n in sched_json.keys()
@@ -1666,7 +1601,7 @@ def sched_updated_json(program_json, sched_json):
             sched_str += ")"
             
     for name in comp_name:
-        transf_loop_nest = get_original_iterators(program_json)
+        transf_loop_nest = program_json["computations"][name]["iterators"].copy()
         schedule = sched_json[name]
         sched_str += '{' + name + '}:'
 

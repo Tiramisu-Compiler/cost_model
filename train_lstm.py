@@ -51,8 +51,7 @@ def main(config: RecursiveLSTMConfig):
     # Reading data
     logging.info("Reading the dataset")
     bl_dict = read_datasets(config)
-#     train_device = "cuda:0"
-    train_device = "cpu"
+    train_device = "cuda:0"
 
     # Defining the model
     logging.info("Defining the model")

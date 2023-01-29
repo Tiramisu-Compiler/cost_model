@@ -1,13 +1,13 @@
 experiment:
     name: "bidirectional_static_input_nn"
-    base_path: "/data/kb4083/model_release/release_code"
+    base_path: "/data/kb4083/model_release/cost_model"
 
 # /data/kb4083/datasets/sample_20m_test.pkl
 # /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
 # /data/mm12191/datasets/benchmarks_mats1.pkl
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/dataset_expr_batch550000-838143_cleaned_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/dataset_expr_batch550000-838143_cleaned_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/sample_20m_test_even_smaller_modified.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/sample_20m_test_even_smaller_modified.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "dataset_factorization"
     batch_size: 1024
@@ -26,10 +26,10 @@ testing:
 
 wandb:
     use_wandb: True
-    project: "recursive_lstm"
+    project: "release_model"
     
 model: 
-    input_size: 880
+    input_size: 890
     comp_embed_layer_sizes:
         - 600
         - 350

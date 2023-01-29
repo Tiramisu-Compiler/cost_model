@@ -99,6 +99,8 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
                     l_code + "Tiled",
                     l_code + "TileFactor",
                     l_code + "Fused",
+                    l_code + "Shifted",
+                    l_code + "ShiftFactor",
                 ]
             )
         
@@ -162,13 +164,6 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         )
 
         comp_repr_template.extend(read_accesses_repr)
-        
-        
-        # Add a historgram of operations for this computation 
-#         comp_repr_template.append(comp_dict["number_of_additions"])
-#         comp_repr_template.append(comp_dict["number_of_subtraction"])
-#         comp_repr_template.append(comp_dict["number_of_multiplication"])
-#         comp_repr_template.append(comp_dict["number_of_division"])
 
         comps_repr_templates_list.append(comp_repr_template)
         
@@ -205,6 +200,8 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
                 l_code + "Fused",
                 l_code + "Unrolled",
                 l_code + "UnrollFactor",
+                l_code + "Shifted",
+                l_code + "ShiftFactor",
             ]
         )
         
@@ -346,7 +343,19 @@ def get_schedule_representation(
                 fused = 1
             p_index = comps_placeholders_indices_dict[l_code + "Fused"]
             comps_repr[p_index[0]][p_index[1]] = fused
-        
+            
+            shifted = 0
+            shifting_factor = 0
+            if comp_schedule_dict['shiftings']:
+                for shifting in comp_schedule_dict['shiftings']: 
+                    if iterator_name.startswith(shifting[0]): # loof if the current loop is being shifted
+                        shifted=1
+                        shifting_factor = shifting[1]
+                        break
+            p_index = comps_placeholders_indices_dict[l_code + "Shifted"]
+            comps_repr[p_index[0]][p_index[1]] = shifted
+            p_index = comps_placeholders_indices_dict[l_code + "ShiftFactor"]
+            comps_repr[p_index[0]][p_index[1]] = shifting_factor
         # Check whether unrolling was applied and put the tags in their corresponding position in the computation representation
         unrolled = 0
         unroll_factor = 0
@@ -405,6 +414,8 @@ def get_schedule_representation(
         loop_schedules_dict[loop_name]["tile_factor"] = 0
         loop_schedules_dict[loop_name]["unrolled"] = 0
         loop_schedules_dict[loop_name]["unroll_factor"] = 0
+        loop_schedules_dict[loop_name]["shifted"] = 0
+        loop_schedules_dict[loop_name]["shift_factor"] = 0
         loop_schedules_dict[loop_name]["parallelized"] = 0
         loop_schedules_dict[loop_name]["fused"] = 0
 
@@ -429,13 +440,6 @@ def get_schedule_representation(
             comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
 #             comp_innermost_loop = computations_dict[comp_name]["iterators"][-1]
             loop_schedules_dict[comp_innermost_loop]["unrolled"] = 1
-            
-            if(loop_schedules_dict[comp_innermost_loop]["unroll_factor"] != 0 and                                                                                         loop_schedules_dict[comp_innermost_loop]["unroll_factor"] != int(comp_schedule_dict["unrolling_factor"])):
-                
-                print(loop_schedules_dict[comp_innermost_loop]["unroll_factor"])
-                print( int(comp_schedule_dict["unrolling_factor"]))
-                print(schedule_json)
-                print(program_json)
                 
             assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or                                                                                           loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
             
@@ -444,9 +448,14 @@ def get_schedule_representation(
         # Check whether parallelization was applied 
         if comp_schedule_dict["parallelized_dim"]:
             loop_schedules_dict[comp_schedule_dict["parallelized_dim"]]["parallelized"] = 1
-
         
-    # Check whether parallelization was applied 
+        
+        if comp_schedule_dict['shiftings']:
+            for shifting in comp_schedule_dict['shiftings']: 
+                loop_schedules_dict[shifting[0]]["shifted"] = 1
+                loop_schedules_dict[shifting[0]]["shift_factor"] = shifting[1]
+        
+    # Check whether fusion was applied 
     if "fusions" in schedule_json and schedule_json["fusions"]:
         for fusion in schedule_json["fusions"]:
             fused_loop1 = computations_dict[fusion[0]]["iterators"][fusion[2]]
@@ -477,7 +486,14 @@ def get_schedule_representation(
         loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name][
             "unroll_factor"
         ]
-
+        
+        p_index = loops_placeholders_indices_dict[l_code + "Shifted"]
+        loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name]["shifted"]
+        p_index = loops_placeholders_indices_dict[l_code + "ShiftFactor"]
+        loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name][
+            "shift_factor"
+        ]
+        
         p_index = loops_placeholders_indices_dict[l_code + "Fused"]
         loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name]["fused"]
         
@@ -498,7 +514,12 @@ def get_schedule_representation(
             loops_repr[p_index[0]][p_index[1]] = 0
             p_index = loops_placeholders_indices_dict[l_code + "UnrollFactor"]
             loops_repr[p_index[0]][p_index[1]] = 0
-
+            
+            p_index = loops_placeholders_indices_dict[l_code + "Shifted"]
+            loops_repr[p_index[0]][p_index[1]] = 0
+            p_index = loops_placeholders_indices_dict[l_code + "ShiftFactor"]
+            loops_repr[p_index[0]][p_index[1]] = 0
+            
             p_index = loops_placeholders_indices_dict[l_code + "Fused"]
             loops_repr[p_index[0]][p_index[1]] = 0
 

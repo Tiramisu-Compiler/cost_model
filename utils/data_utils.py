@@ -1461,9 +1461,9 @@ def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, 
     for i in iterators_list:
         for j in range(2):
             if j == 0 :
-                result.append(format_bound(i, iterators_list[i]["lower_bound"], iterators_list, True))
+                result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
             else:
-                result.append(format_bound(i, iterators_list[i]["upper_bound"], iterators_list, False))
+                result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
                 
     result = np.c_[np.ones(len(result)), result]
     result = np.r_[[np.ones(len(result[0]))], result]
@@ -1485,9 +1485,9 @@ def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_na
     for i in iterators_list:
         for j in range(2):
             if j == 0 :
-                result.append(format_bound(i, iterators_list[i]["lower_bound"], iterators_list, True))
+                result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
             else:
-                result.append(format_bound(i, iterators_list[i]["upper_bound"], iterators_list, False))
+                result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
     inverse = np.linalg.inv(transformation_matrix)
     result = np.matmul(result, inverse)
     

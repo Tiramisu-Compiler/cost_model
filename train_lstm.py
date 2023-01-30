@@ -10,30 +10,6 @@ from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
 
-
-def read_datasets(config):
-    path = os.path.join(
-        config.experiment.base_path,
-        "dataset/valid",
-        f"{config.data_generation.dataset_name}.pt",
-    )
-    with open(path, "rb") as file:
-        valid_ds, valid_bl, valid_indices = torch.load(path)
-        del valid_ds, valid_indices
-
-    path = os.path.join(
-        config.experiment.base_path,
-        "dataset/train",
-        f"{config.data_generation.dataset_name}.pt",
-    )
-    with open(path, "rb") as file:
-        train_ds, train_bl, train_indices = torch.load(path)
-        del train_ds, train_indices
-
-    bl_dict = {"train": train_bl, "val": valid_bl}
-    return bl_dict
-
-
 @hydra.main(config_path="conf", config_name="config")
 def main(config: RecursiveLSTMConfig):
     # Defining logger
@@ -50,9 +26,8 @@ def main(config: RecursiveLSTMConfig):
     
     # Reading data
     logging.info("Reading the dataset")
-    bl_dict = read_datasets(config)
-    train_device = "cuda:0"
-
+#     bl_dict = read_datasets(config)
+    
     # Defining the model
     logging.info("Defining the model")
     model = Model_Recursive_LSTM_v2(
@@ -60,11 +35,15 @@ def main(config: RecursiveLSTMConfig):
         comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
         drops=list(config.model.drops),
         loops_tensor_size=8,
-        train_device=train_device,
+        train_device=config.training.gpu,
     )
     for param in model.parameters():
         param.requires_grad = True
+    train_ds, train_bl, train_indices= load_pickled_repr(repr_pkl_output_folder= os.path.join(config.experiment.base_path ,'pickled/pickled_')+Path(config.data_generation.train_dataset_file).parts[-1][:-4],
+                                          max_batch_size = 1024, store_device=config.training.gpu, train_device=config.training.gpu)
 
+    val_ds, val_bl, val_indices= load_pickled_repr(repr_pkl_output_folder=os.path.join(config.experiment.base_path ,'pickled/pickled_')+Path(config.data_generation.valid_dataset_file).parts[-1][:-4],
+                                          max_batch_size = 1024, store_device=config.training.gpu, train_device=config.training.gpu)
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(
@@ -92,7 +71,7 @@ def main(config: RecursiveLSTMConfig):
         num_epochs=config.training.max_epochs,
         logger=logger,
         log_every=1,
-        train_device=train_device,
+        train_device=config.training.gpu,
     )
 
 

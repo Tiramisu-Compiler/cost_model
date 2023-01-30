@@ -211,19 +211,12 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     no_sched_json = program_dict["schedules_list"][0]
     
     # Make sure no fusion was applied on this version and get the original tree structure 
-    if (not ("fusions" not in no_sched_json or no_sched_json["fusions"] == None)):
-        
-        with open('program_dict.txt', 'w') as f:
-            f.write(str(program_dict))
-            f.write("program_dict")
-            f.write(str(no_sched_json))
-#         print(program_dict)
     assert "fusions" not in no_sched_json or no_sched_json["fusions"] == None
     
     orig_tree_structure = no_sched_json["tree_structure"]
     tree_annotation = copy.deepcopy(orig_tree_structure)
     
-    # TODO what is there to update
+   
     prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device=train_device)
     
     return (
@@ -942,8 +935,7 @@ def load_data(
         train_batches_list,
         train_batches_indices,
     )
-# TODO purpose of this dict / better placement
-global_dioph_sols_dict = dict()
+
 # A function to extract the transformations applied on a spesific computation in the form of a vector of tags
 # Padding is added if the number of transformations is less than the maximum value of MAX_NUM_TRANSFORMATIONS
 # Currently our dataset represents transformations in two different formats.
@@ -1407,8 +1399,9 @@ def get_comp_iterators_from_tree_struct(schedule_json, comp_name):
     tree = schedule_json["tree_structure"]
     level = tree
     iterators = []
-    to_explore = [root for root in tree["roots"]]
-    # to_explore.append(tree)
+    # only add the root that contains the computation we are looking for
+    to_explore = [root if (comp_name in get_involved_comps(root)) for root in tree["roots"]]
+    
     while(to_explore):
         level = to_explore.pop(0)
         if(comp_name in get_involved_comps(level)):

@@ -27,8 +27,11 @@ class NbAccessException(Exception):
 class LoopsDepthException(Exception):
     pass
 
-# Maximum sequence of transformations (reversal, interchange and skewing) allowed. Currently set to 5 
+# Maximum sequence of transformations (reversal, interchange and skewing) allowed. Currently set to 4 
 MAX_NUM_TRANSFORMATIONS = 4
+
+# Maximum sequence of transformations (reversal, interchange and skewing) allowed. Currently set to 4 
+MAX_DEPTH = 5
 
 # Maximum size of the tags vector representing each transformation
 MAX_TAGS = 8
@@ -84,10 +87,6 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
             # TODOF does this work when iterators have the same name?
             iterator_dict = program_json["iterators"][iterator_name]
-            # Add the bounds of the loop
-            iterators_repr.extend(
-                [iterator_dict["lower_bound"], iterator_dict["upper_bound"]]
-            )
             # Create a unique code for each loop
             c_code = "C" + str(comp_index)
             l_code = c_code + "-L" + str(iter_i)
@@ -115,7 +114,6 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         iterators_repr.extend([c_code + "-Unrolled", c_code + "-UnrollFactor"])
 
         # Add a placeholder for the other transformations to be applied (skewing, reversal and interchage)
-        # We use MAX_NUM_TRANSFORMATIONS instead of MAX_NUM_TRANSFORMATIONS to include the matrix that represents the whole sequence
         iterators_repr.append(c_code + "-TransformationTagsStart")
         iterators_repr.extend(["M"] * (MAX_TAGS * MAX_NUM_TRANSFORMATIONS - 2))
         iterators_repr.append(c_code + "-TransformationTagsEnd")
@@ -124,11 +122,17 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         iterators_repr.append(c_code+'-OgConstraintMatrixStart')
         iterators_repr.extend(['C']*((max_depth+1)*((max_depth+1)*2)-2))
         iterators_repr.append(c_code+'-OgConstraintMatrixEnd')
+        
+        # Adding initial constraint matrix
+        iterators_repr.append(c_code+'-OgConstraintVectorStart')
+        iterators_repr.extend(['V']*(MAX_DEPTH*2-2))
+        iterators_repr.append(c_code+'-OgConstraintVectorEnd')
+        
         # Adding transformed constraint matrix
         iterators_repr.append(c_code+'-ConstraintMatrixStart')
         iterators_repr.extend(['C']*((max_depth+1)*((max_depth+1)*2)-2))
         iterators_repr.append(c_code+'-ConstraintMatrixEnd')
-        
+                              
         # Add the loop representation to the computation vector 
         comp_repr_template.extend(iterators_repr)
         
@@ -184,13 +188,6 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         loop_repr_template = []
         l_code = "L" + loop_name
         
-        # Add the bounds of the loop
-        loop_repr_template.extend(
-            [
-                program_json["iterators"][loop_name]["lower_bound"],
-                program_json["iterators"][loop_name]["upper_bound"],
-            ]
-        )
         # Add a placeholder for transformations applied to this loop
         loop_repr_template.extend(
             [
@@ -393,6 +390,14 @@ def get_schedule_representation(
         max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
         
         comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth_it).flatten().tolist()
+                              
+        ogv_start = comps_placeholders_indices_dict[c_code+'-OgConstraintVectorStart']
+        
+        ogv_end = comps_placeholders_indices_dict[c_code+'-OgConstraintVectorEnd']
+        
+        nb_mat_elements = ogv_end[1] - ogv_start[1] + 1
+        
+        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name)
         
         c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
         
@@ -1478,6 +1483,29 @@ def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, 
     )
     return result
 
+# check whether the string contains an integer and return true if so
+def is_int(s):
+    if s[0] in ('-', '+'):
+        return s[1:].isdigit()
+    return s.isdigit()
+
+# returns a vector that represents the right hand sise of teh constraint matrix inequalities
+# returns b where: Ax <= b and A being the constarint matrix
+def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name):
+    iterators_list = program_json["computations"][comp_name]["iterators"]
+    result = []
+    for it in iterators_list:
+        if(is_int(program_json["iterators"][it]["lower_bound"])):
+            result.append(int(program_json["iterators"][it]["lower_bound"]))
+        else:
+            result.append(0)
+        if(is_int(program_json["iterators"][it]["upper_bound"])):
+            result.append(int(program_json["iterators"][it]["upper_bound"]))
+        else:
+            result.append(0)
+    result = result + [0]*(MAX_DEPTH*2-len(result))
+    return result
+                              
 def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth):
     iterators_list = program_json["computations"][comp_name]["iterators"]
     transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)

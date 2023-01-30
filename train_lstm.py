@@ -59,7 +59,7 @@ def main(config: RecursiveLSTMConfig):
         input_size=config.model.input_size,
         comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
         drops=list(config.model.drops),
-        loops_tensor_size=10,
+        loops_tensor_size=8,
         train_device=train_device,
     )
     for param in model.parameters():

@@ -30,9 +30,6 @@ class LoopsDepthException(Exception):
 # Maximum sequence of transformations (reversal, interchange and skewing) allowed. Currently set to 4 
 MAX_NUM_TRANSFORMATIONS = 4
 
-# Maximum sequence of transformations (reversal, interchange and skewing) allowed. Currently set to 4 
-MAX_DEPTH = 5
-
 # Maximum size of the tags vector representing each transformation
 MAX_TAGS = 8
 
@@ -125,7 +122,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         
         # Adding initial constraint matrix
         iterators_repr.append(c_code+'-OgConstraintVectorStart')
-        iterators_repr.extend(['V']*(MAX_DEPTH*2-2))
+        iterators_repr.extend(['V']*(max_depth*2-2))
         iterators_repr.append(c_code+'-OgConstraintVectorEnd')
         
         # Adding transformed constraint matrix
@@ -397,7 +394,7 @@ def get_schedule_representation(
         
         nb_mat_elements = ogv_end[1] - ogv_start[1] + 1
         
-        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name)
+        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name, max_depth)
         
         c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
         
@@ -1491,7 +1488,7 @@ def is_int(s):
 
 # returns a vector that represents the right hand sise of teh constraint matrix inequalities
 # returns b where: Ax <= b and A being the constarint matrix
-def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name):
+def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name, max_depth):
     iterators_list = program_json["computations"][comp_name]["iterators"]
     result = []
     for it in iterators_list:
@@ -1503,7 +1500,7 @@ def get_padded_second_side_of_the_constraint_equations_original(program_json, sc
             result.append(int(program_json["iterators"][it]["upper_bound"]))
         else:
             result.append(0)
-    result = result + [0]*(MAX_DEPTH*2-len(result))
+    result = result + [0]*(max_depth*2-len(result))
     return result
                               
 def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth):

@@ -82,7 +82,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         iterators_repr = []
         # Add a representation of each loop of this computation
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
-            
+            # TODOF does this work when iterators have the same name?
             iterator_dict = program_json["iterators"][iterator_name]
             # Add the bounds of the loop
             iterators_repr.extend(
@@ -392,7 +392,7 @@ def get_schedule_representation(
         
         max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
         
-        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(len(comp_dict["iterators"]), max_depth_it).flatten().tolist()
+        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth_it).flatten().tolist()
         
         c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
         
@@ -402,7 +402,7 @@ def get_schedule_representation(
         
         max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
         
-        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(len(comp_dict["iterators"]), max_depth_it, get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)).flatten().tolist()
+        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth_it).flatten().tolist()
         
 
     # Fill the loop representation
@@ -688,7 +688,6 @@ class Dataset:
 
                 # Check whether we can clip the obtained speedup
                 sched_speedup = speedups_clip_func(sched_speedup)
-                
                 
                 # Fill the obtained template with the corresponsing schedule features
                 try:
@@ -1455,16 +1454,17 @@ def get_tree_expr_repr(node, comp_type):
 
         return expr_tensor
     
-def get_padded_initial_constrain_matrix(nb_iterators, max_depth):
+def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth):
+    iterators_list = program_json["computations"][comp_name]["iterators"]
+    transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)
     result = []
-    for i in range(nb_iterators):
+    for i in iterators_list:
         for j in range(2):
             if j == 0 :
-                result.append(format_bound(i, nb_iterators, True))
+                result.append(format_bound(i, iterators_list[i]["lower_bound"], iterators_list, True))
             else:
-                result.append(format_bound(i, nb_iterators, False))
-#     print(result)
-#     print(len(result))
+                result.append(format_bound(i, iterators_list[i]["upper_bound"], iterators_list, False))
+                
     result = np.c_[np.ones(len(result)), result]
     result = np.r_[[np.ones(len(result[0]))], result]
     result = np.pad(
@@ -1477,14 +1477,17 @@ def get_padded_initial_constrain_matrix(nb_iterators, max_depth):
         constant_values=0,
     )
     return result
-def get_padded_transformed_constrain_matrix(nb_iterators, max_depth, transformation_matrix):
+
+def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth):
+    iterators_list = program_json["computations"][comp_name]["iterators"]
+    transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)
     result = []
-    for i in range(nb_iterators):
+    for i in iterators_list:
         for j in range(2):
             if j == 0 :
-                result.append(format_bound(i, nb_iterators, True))
+                result.append(format_bound(i, iterators_list[i]["lower_bound"], iterators_list, True))
             else:
-                result.append(format_bound(i, nb_iterators, False))
+                result.append(format_bound(i, iterators_list[i]["upper_bound"], iterators_list, False))
     inverse = np.linalg.inv(transformation_matrix)
     result = np.matmul(result, inverse)
     
@@ -1499,21 +1502,25 @@ def get_padded_transformed_constrain_matrix(nb_iterators, max_depth, transformat
         mode="constant",
         constant_values=0,
     )
-#     print(transformation_matrix)
-#     print(result)
     return result
 
-def format_bound(id_rank, size, is_lower):
+def format_bound(iterator_name, bound, iterators_list, is_lower):
     output = []
-    for i in range(size):
-        if i == id_rank:
+    for i in iterators_list:
+        if i == iterator_name:
             if is_lower :
                 output.append(-1)
             else:
                 output.append(1)
+        elif (i == bound):
+            if is_lower :
+                output.append(1)
+            else:
+                output.append(-1)
         else:
             output.append(0)
     return output
+
 def get_trasnformation_matrix_from_vector(transformation, matrix_size):
     matrix = np.identity(matrix_size)
     

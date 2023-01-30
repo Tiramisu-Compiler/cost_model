@@ -1706,7 +1706,11 @@ def get_schedule_str(program_json, sched_json):
             
             dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
             sched_str += "P(L" + str(dim_index) + ")"
-
+            
+        for shifting in schedule['shiftings']: 
+            dim_index = transf_loop_nest.index(shifting[0])
+            sched_str += "Sh(L" + str(dim_index) + "," + str(shifting[1])+")"
+                
         if schedule["tiling"]:
             if schedule["tiling"]["tiling_depth"] == 2:
                 first_dim = schedule["tiling"]["tiling_dims"][0]

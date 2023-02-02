@@ -3,6 +3,7 @@ import json
 import pickle
 import random
 import re
+import gc
 import multiprocessing
 import shutil
 import resource
@@ -527,7 +528,16 @@ def get_schedule_representation(
 
     return computations_tensor, loops_tensor
 
-
+# A class to contain the training and validation datasets
+# Parameters:
+#     dataset_filename: path to training/val dataset
+#     max_batch_size: maximum batch size
+#     drop_sched_func: function specifying which schedules in the dataset we want to be dropped if any
+#     drop_prog_func: function specifying which programs in the dataset we want to be dropped if any
+#     can_set_default_eval: function spesifying which points in the dataset can be set to default evaluation TODO add section where this is justified
+#     speedups_clip_func: function spesifying which speedups to clip and to what value
+#     store_device: device where to store the dataset
+#     train_device: device where to train the model
 class Dataset_parallel:
     def __init__(
         self,
@@ -561,13 +571,12 @@ class Dataset_parallel:
         self.dropped_funcs = []
         # TODO remove this unused variable
         self.function_names_map = dict()
-        # Saved data attributes for analysis and expirements TODO maybe remove this
-        self.batched_datapoint_attributes = []
+#         # Saved data attributes for analysis and expirements TODO maybe remove this
+#         self.batched_datapoint_attributes = []
         # number of loaded datapoints
         self.nb_datapoints = 0
         
         processes_output_list = []
-
         if just_load_pickled_repr: #just load the existing repr
             
             for pkl_part_filename in tqdm(list(Path(repr_pkl_output_folder).iterdir())):
@@ -605,7 +614,7 @@ class Dataset_parallel:
 
             for i in range(nb_processes):
                 process_programs_dict=dict(list(self.programs_dict.items())[i*nb_funcs_per_process:(i+1)*nb_funcs_per_process])
-                input_queue.put((i,process_programs_dict,repr_pkl_output_folder,store_device))
+                input_queue.put((i, process_programs_dict, repr_pkl_output_folder, store_device))
 
             for i in range(nb_processes):
                 process_id, pkl_part_filename = output_queue.get()
@@ -613,268 +622,6 @@ class Dataset_parallel:
                     lst = pickle.load(f)
                 processes_output_list.extend(lst)
 
-        
-        if drop_sched_func == None:
-
-            def drop_sched_func(x, y):
-                return False
-
-        if drop_prog_func == None:
-
-            def drop_prog_func(x):
-                return False
-
-        if speedups_clip_func == None:
-
-            def speedups_clip_func(x):
-                return x
-
-        if can_set_default_eval == None:
-            def can_set_default_eval(x, y):
-                return 0
-        nb_all = 0
-        for function_name, nb_dropped, nb_pruned, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
-            for node in local_function_dict['tree']["roots"]:
-                tree_indices_to_device(node, train_device=store_device)
-            self.batches_dict[tree_footprint] = self.batches_dict.get(tree_footprint, {'tree': local_function_dict['tree'], 'comps_tensor_list': [], 'loops_tensor_list': [
-            ], 'datapoint_attributes_list': [], 'comps_expr_tree_list': [], 'speedups_list': [], 'exec_time_list': [], "func_id": []})
-            
-            
-#             self.batches_dict[tree_footprint]["func_id"].append(0)
-            self.batches_dict[tree_footprint]['comps_tensor_list'].extend(
-                local_function_dict['comps_tensor_list'])
-            self.batches_dict[tree_footprint]['loops_tensor_list'].extend(
-                local_function_dict['loops_tensor_list'])
-            self.batches_dict[tree_footprint]['datapoint_attributes_list'].extend(
-                local_function_dict['datapoint_attributes_list'])
-            self.batches_dict[tree_footprint]["comps_expr_tree_list"].extend(
-                local_function_dict["comps_expr_tree_list"]
-            )
-            self.batches_dict[tree_footprint]['speedups_list'].extend(
-                local_function_dict['speedups_list'])
-
-            self.nb_dropped += nb_dropped
-            self.nb_pruned += nb_pruned
-            self.nb_datapoints += len(local_function_dict['speedups_list'])
-            nb_all += nb_all_local
-
-        max_exprs = 0
-        for tree_footprint in tqdm(self.batches_dict):
-            max_exprs = max([max([max([len(comp) for comp in function])
-                                  for function in self.batches_dict[tree_footprint]["comps_expr_tree_list"]]), max_exprs])
-
-        for tree_footprint in tqdm(self.batches_dict):
-            lengths = []
-            for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
-                lengths.append([])
-                for j in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i])):
-                    lengths[i].append(len(
-                        self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j]))
-                    self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j].extend(
-                        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
-                self.batches_dict[tree_footprint]["comps_expr_tree_list"][i] = torch.tensor(
-                    [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]])
-            self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"] = torch.tensor(
-                lengths)
-
-        storing_device = torch.device(store_device)
-        print("Batching ...")
-        for tree_footprint in tqdm(self.batches_dict):
-
-            # shuffling the lists inside each footprint to avoid having batches with very low program diversity
-            zipped = list(
-                zip(
-                    self.batches_dict[tree_footprint]["datapoint_attributes_list"],
-                    self.batches_dict[tree_footprint]["comps_tensor_list"],
-                    self.batches_dict[tree_footprint]["comps_expr_tree_list"],
-                    self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
-                    self.batches_dict[tree_footprint]["loops_tensor_list"],
-                    self.batches_dict[tree_footprint]["speedups_list"],
-#                     self.batches_dict[tree_footprint]["func_id"],
-                )
-            )
-
-            random.shuffle(zipped)
-            (
-                self.batches_dict[tree_footprint]["datapoint_attributes_list"],
-                self.batches_dict[tree_footprint]["comps_tensor_list"],
-                self.batches_dict[tree_footprint]["comps_expr_tree_list"],
-                self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
-                self.batches_dict[tree_footprint]["loops_tensor_list"],
-                self.batches_dict[tree_footprint]["speedups_list"],
-#                 self.batches_dict[tree_footprint]["func_id"],
-            ) = zip(*zipped)
-
-            for chunk in range(
-                0,
-                len(self.batches_dict[tree_footprint]["speedups_list"]),
-                max_batch_size,
-            ):
-                
-                if (
-                    storing_device.type == "cuda"
-                    and (
-                        torch.cuda.memory_allocated(storing_device.index)
-                        / torch.cuda.get_device_properties(
-                        storing_device.index
-                        ).total_memory
-                    )
-                    > 0.8
-                ):
-                    print(
-                        "GPU memory on "
-                        + str(storing_device)
-                        + " nearly full, switching to CPU memory"
-                    )
-                    storing_device = torch.device("cpu")
-                
-                self.batched_datapoint_attributes.append(
-                    self.batches_dict[tree_footprint]["datapoint_attributes_list"][
-                        chunk: chunk + max_batch_size
-                    ]
-                )
-                ###########################################################
-#                 x = torch.cat(
-#                     self.batches_dict[tree_footprint]["comps_tensor_list"][
-#                         chunk: chunk + max_batch_size
-#                     ],
-#                     0,
-#                 )
-#                 batch_size, num_comps, __dict__ = x.shape
-#                 x = x.view(batch_size * num_comps, -1)
-#                 (first_part, final_matrix, vectors, third_part) = seperate_vector(
-#                         x, num_matrices=5, pad=False
-#                     )
-#                 x = torch.cat(
-#                     (
-#                         first_part,
-#                         third_part,
-#                         final_matrix.reshape(batch_size * num_comps, -1),
-#                     ),
-#                     dim=1,
-#                 ).view(batch_size, num_comps, -1)
-                ############################################################
-                self.batched_X.append(
-                    (
-                        self.batches_dict[tree_footprint]["tree"],
-                        torch.cat(
-                            self.batches_dict[tree_footprint]["comps_tensor_list"][
-                                chunk : chunk + max_batch_size
-                            ],
-                            0,
-                        ).to(storing_device),
-                        torch.cat(
-                            self.batches_dict[tree_footprint]["loops_tensor_list"][
-                                chunk : chunk + max_batch_size
-                            ],
-                            0,
-                        ).to(storing_device),
-                         torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][
-                            chunk: chunk + max_batch_size
-                        ],
-                            0,).to(storing_device),
-                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"][
-                            chunk: chunk + max_batch_size
-                        ],
-                            0,).to(storing_device),
-                    )
-                )
-                self.batched_Y.append(
-                    torch.FloatTensor(
-                        self.batches_dict[tree_footprint]["speedups_list"][
-                            chunk: chunk + max_batch_size
-                        ]
-                    ).to(storing_device)
-                )
-
-        # shuffling batches to avoid having the same footprint in consecutive batches
-        zipped = list(
-            zip(
-                self.batched_X,
-                self.batched_Y,
-                self.batched_datapoint_attributes,
-            )
-        )
-        random.shuffle(zipped)
-        (
-            self.batched_X,
-            self.batched_Y,
-            self.batched_datapoint_attributes,
-        ) = zip(*zipped)
-
-        print(
-            f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}"
-        )
-        print(
-            f"Number of dropped {self.nb_dropped}, all {nb_all}"
-        )
-        # del self.programs_dict
-        del self.batches_dict
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            start, stop, step = index.indices(len(self))
-            return [self[i] for i in range(start, stop, step)]
-        elif isinstance(index, int):
-            return (self.batched_X[index], self.batched_Y[index])
-
-    def __len__(self):
-        return len(self.batched_Y)    
-# A class to contain the training and validation datasets
-# Parameters:
-#     dataset_filename: path to training/val dataset
-#     max_batch_size: maximum batch size
-#     drop_sched_func: function specifying which schedules in the dataset we want to be dropped if any
-#     drop_prog_func: function specifying which programs in the dataset we want to be dropped if any
-#     can_set_default_eval: function spesifying which points in the dataset can be set to default evaluation TODO add section where this is justified
-#     speedups_clip_func: function spesifying which speedups to clip and to what value
-#     store_device: device where to store the dataset
-#     train_device: device where to train the model
-class Dataset:
-    def __init__(
-        self,
-        dataset_filename,
-        max_batch_size,
-        drop_sched_func=None,
-        drop_prog_func=None,
-        can_set_default_eval=None,
-        speedups_clip_func=None,
-        store_device="cpu",
-        train_device="cpu",
-    ):
-        # in case the dataset was stored in the json format
-        if dataset_filename.endswith("json"):
-            # we open the dataset as a normal file
-            with open(dataset_filename, "r") as f:
-                dataset_str = f.read()
-            self.programs_dict = json.loads(dataset_str)
-        # in case the dataset was stored in the pkl format
-        elif dataset_filename.endswith("pkl"):
-            # we un-pickle the file using the pickle library 
-            with open(dataset_filename, "rb") as f:
-                self.programs_dict = pickle.load(f)
-
-        # Structure to contain the batched inputs
-        self.batched_X = []
-        # Structure to contain the batched labels
-        self.batched_Y = []
-        # Structure to contain TODO
-        self.batches_dict = dict()
-        # Maximum number of nested loops in a program
-        self.max_depth = 5
-        # Number of all the dropped schedules
-        self.nb_dropped = 0
-        self.nb_dropped_random_matrix = 0
-        # Number of dropped schedules due to the drop schedule function only
-        self.nb_pruned = 0
-        # List of dropped functions 
-        self.dropped_funcs = []
-        # TODO remove this unused variable
-        self.function_names_map = dict()
-        # Saved data attributes for analysis and expirements TODO maybe remove this
-        self.batched_datapoint_attributes = []
-        # number of loaded datapoints
-        self.nb_datapoints = 0
         
         # If no function to drop schedules was specified, define a function that doesn't drop any schedule
         if drop_sched_func == None:
@@ -898,127 +645,28 @@ class Dataset:
 
             def can_set_default_eval(x, y):
                 return 0
-        # shuffle the programs of the dataset
-        functions_list = list(self.programs_dict.keys())
-        random.Random(42).shuffle(functions_list)
-        for index, function_name in enumerate(tqdm(functions_list)):
-            # Check whether this function should be dropped
-            if drop_prog_func(self.programs_dict[function_name], function_name):
-                self.nb_dropped += len(
-                    self.programs_dict[function_name]["schedules_list"]
-                )
-                self.dropped_funcs.append(function_name)
-                continue
-            # Get the JSON representation of the program features
-            program_json = self.programs_dict[function_name]["program_annotation"]
-            # Extract the representation template for the datapoints
-#             print(function_name)
-            try:
-                (
-                    prog_tree,
-                    comps_repr_templates_list,
-                    loops_repr_templates_list,
-                    comps_placeholders_indices_dict,
-                    loops_placeholders_indices_dict,
-                    comps_expr_repr_templates_list
-                ) = get_representation_template(
-                    self.programs_dict[function_name],
-                    max_depth=self.max_depth,
-                    train_device=train_device,
-                )
-            except (NbAccessException, LoopsDepthException):
-                # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
-                self.nb_dropped += len(
-                    self.programs_dict[function_name]["schedules_list"]
-                )
-                continue
-            # Get the initial execution time for the program to calculate the speedups (initial exec time / transformed exec time)
-            program_exec_time = self.programs_dict[function_name][
-                "initial_execution_time"
-            ]
-            # Get the program tree footprint
-            tree_footprint = get_tree_footprint(prog_tree)
-            self.batches_dict[tree_footprint] = self.batches_dict.get(
-                tree_footprint,
-                {
-                    "tree": prog_tree,
-                    "comps_tensor_list": [],
-                    "comps_expr_tree_list": [],
-                    "loops_tensor_list": [],
-                    "datapoint_attributes_list": [],
-                    "speedups_list": [],
-                    "exec_time_list": [],
-                    "func_id": [],
-                },
-            )
-            # For each schedule (sequence of transformations) collected for this function
-            for schedule_index in range(len(self.programs_dict[function_name]["schedules_list"]) ):
-                # Get the schedule JSON representation
-                schedule_json = self.programs_dict[function_name]["schedules_list"][schedule_index]
-                
-                # Get the transformed execution time
-                sched_exec_time = np.min(schedule_json["execution_times"])
-                
-                # Check if this schedule should be dropped
-                if drop_sched_func(self.programs_dict[function_name], schedule_index ) or (not sched_exec_time):
-                    self.nb_dropped += 1
-                    self.nb_pruned += 1
-                    continue
-                # Calculate the speed up obtained from applying the list of transformations spesified by the schedule
-                sched_speedup = program_exec_time / sched_exec_time
+            
+        nb_all = 0
+        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        print("all processes are done. Updating batches_dict")
+        for function_name, nb_dropped, nb_pruned, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
+            for node in local_function_dict['tree']["roots"]:
+                tree_indices_to_device(node, train_device=store_device)
+            self.batches_dict[tree_footprint] = self.batches_dict.get(tree_footprint, {'tree': local_function_dict['tree'], 'comps_tensor_list': [], 'loops_tensor_list': [ ], 'datapoint_attributes_list': [], 'comps_expr_tree_list': [], 'speedups_list': [], 'exec_time_list': [], "func_id": []})
+            
+            self.batches_dict[tree_footprint]['comps_tensor_list'].extend(local_function_dict['comps_tensor_list'])
+            self.batches_dict[tree_footprint]['loops_tensor_list'].extend(local_function_dict['loops_tensor_list'])
+            self.batches_dict[tree_footprint]['datapoint_attributes_list'].extend(local_function_dict['datapoint_attributes_list'])
+            self.batches_dict[tree_footprint]["comps_expr_tree_list"].extend(local_function_dict["comps_expr_tree_list"])
+            self.batches_dict[tree_footprint]['speedups_list'].extend(local_function_dict['speedups_list'])
 
-                # Check whether we can set a default value for this speedup through the can_set_default_eval function.
-                def_sp = can_set_default_eval(self.programs_dict[function_name]["program_annotation"], schedule_json)
-                
-                
-                # If the function returns 0, this means no default value was spesified
-                if def_sp > 0:
-                    sched_speedup = def_sp
-
-                # Check whether we can clip the obtained speedup
-                sched_speedup = speedups_clip_func(sched_speedup)
-                
-                # Fill the obtained template with the corresponsing schedule features
-                try:
-                    comps_tensor, loops_tensor = get_schedule_representation(
-                        program_json,
-                        schedule_json,
-                        comps_repr_templates_list,
-                        loops_repr_templates_list,
-                        comps_placeholders_indices_dict,
-                        loops_placeholders_indices_dict,
-                        self.max_depth,
-                    )
-                except NbTranformationException:
-                    # If the number of transformations exceeded the specified max, we skip this schedule
-                    self.nb_dropped += 1 
-                    continue
-                except RandomMatrix :
-                    self.nb_dropped += 1
-                    self.nb_dropped_random_matrix += 1
-                    continue
-                    
-                # Get information about this datapoint (memory use, execution time...)
-                datapoint_attributes = get_datapoint_attributes(
-                    function_name,
-                    self.programs_dict[function_name],
-                    schedule_index,
-                    tree_footprint,
-                )
-                # Add each part of the input to the batches dict
-                self.batches_dict[tree_footprint]["func_id"].append(index)
-                
-                self.batches_dict[tree_footprint]["comps_tensor_list"].append(comps_tensor)
-                
-                self.batches_dict[tree_footprint]["loops_tensor_list"].append(loops_tensor)
-                
-                self.batches_dict[tree_footprint]["datapoint_attributes_list"].append(datapoint_attributes )
-                
-                self.batches_dict[tree_footprint]["comps_expr_tree_list"].append(comps_expr_repr_templates_list)
-                
-                self.batches_dict[tree_footprint]["speedups_list"].append(sched_speedup)
-                self.nb_datapoints += 1
-        
+            self.nb_dropped += nb_dropped
+            self.nb_pruned += nb_pruned
+            self.nb_datapoints += len(local_function_dict['speedups_list'])
+            nb_all += nb_all_local
+            
+        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        print("about to calculate maximum length of expressions")
         # Calculate the maximum length of an expression in the batch for padding later
         max_exprs = 0
         for tree_footprint in self.batches_dict:
@@ -1039,15 +687,14 @@ class Dataset:
                     [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]])
             self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"] = torch.tensor(
                 lengths)
+
         storing_device = torch.device(store_device)
-#         print("number of dropped points due to uncoherent skewing parameters", nb_uncoherent_skewing_params)
-        print("Number of dropped points", self.nb_dropped)
-        print("Number of dropped points from random matrices", self.nb_dropped_random_matrix)
+        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         print("Batching ...")
-        # For each tree footprint in the dataset TODO explain what a tree footprint is 
+        # For each tree footprint in the dataset TODO explain what a tree footprint is
         for tree_footprint in tqdm(self.batches_dict):
 
-            # Shuffling the lists inside each footprint to avoid having batches with very low program diversity
+            # shuffling the lists inside each footprint to avoid having batches with very low program diversity
             zipped = list(
                 zip(
                     self.batches_dict[tree_footprint]["datapoint_attributes_list"],
@@ -1056,12 +703,10 @@ class Dataset:
                     self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
                     self.batches_dict[tree_footprint]["loops_tensor_list"],
                     self.batches_dict[tree_footprint]["speedups_list"],
-                    self.batches_dict[tree_footprint]["func_id"],
                 )
             )
 
             random.shuffle(zipped)
-            
             (
                 self.batches_dict[tree_footprint]["datapoint_attributes_list"],
                 self.batches_dict[tree_footprint]["comps_tensor_list"],
@@ -1069,30 +714,21 @@ class Dataset:
                 self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
                 self.batches_dict[tree_footprint]["loops_tensor_list"],
                 self.batches_dict[tree_footprint]["speedups_list"],
-                self.batches_dict[tree_footprint]["func_id"],
             ) = zip(*zipped)
             
             # Split the data into batches of size max_batch_size
-            for chunk in range(
-                0,
-                len(self.batches_dict[tree_footprint]["speedups_list"]),
-                max_batch_size,
-            ):
-                if ( storing_device.type == "cuda" and (
-                        torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory
-                    ) > 0.80
-                ):  # Check GPU memory in order to avoid Out of memory error
-                    print(
-                        "GPU memory on "
-                        + str(storing_device)
-                        + " nearly full, switching to CPU memory"
-                    )
+            for chunk in range( 0, len(self.batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
+                # Check GPU memory in order to avoid Out of memory error
+                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.9):
+                    
+                    print( "GPU memory on " + str(storing_device) + " nearly full, switching to CPU memory" )
                     storing_device = torch.device("cpu")
-                self.batched_datapoint_attributes.append(
-                    self.batches_dict[tree_footprint]["datapoint_attributes_list"][
-                        chunk : chunk + max_batch_size
-                    ]
-                )
+                
+#                 self.batched_datapoint_attributes.append(
+#                     self.batches_dict[tree_footprint]["datapoint_attributes_list"][
+#                         chunk: chunk + max_batch_size
+#                     ]
+#                 )
                 # Here we separate the comps tensor to get the transformation vectors
                 x = torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device)
                 batch_size, num_comps, __dict__ = x.shape
@@ -1106,38 +742,40 @@ class Dataset:
                         first_part.to(storing_device).view(batch_size, num_comps, -1),
                         vectors.to(storing_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
                         third_part.to(storing_device).view(batch_size, num_comps, -1),
-                        #torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
-                        
                         torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
                         torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
                         torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
                     )
                 )
                 self.batched_Y.append(
-                    torch.FloatTensor( self.batches_dict[tree_footprint]["speedups_list"][ chunk : chunk + max_batch_size ]).to(storing_device)
+                    torch.FloatTensor(
+                        self.batches_dict[tree_footprint]["speedups_list"][
+                            chunk: chunk + max_batch_size
+                        ]
+                    ).to(storing_device)
                 )
-        
+
         # shuffling batches to avoid having the same footprint in consecutive batches
         zipped = list(
             zip(
                 self.batched_X,
                 self.batched_Y,
-                self.batched_datapoint_attributes,
+#                 self.batched_datapoint_attributes,
             )
         )
         random.shuffle(zipped)
         (
             self.batched_X,
             self.batched_Y,
-            self.batched_datapoint_attributes,
+#             self.batched_datapoint_attributes,
         ) = zip(*zipped)
 
-        print(
-            f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}"
-        )
-        # Delete unecessary structures to optimize memory use
-        del self.programs_dict
+        print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}" )
+        print( f"Number of dropped {self.nb_dropped}, all {nb_all}" )
         del self.batches_dict
+        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        gc.collect()
+        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -1145,9 +783,10 @@ class Dataset:
             return [self[i] for i in range(start, stop, step)]
         elif isinstance(index, int):
             return (self.batched_X[index], self.batched_Y[index])
-        
+
     def __len__(self):
-        return len(self.batched_Y)
+        return len(self.batched_Y)    
+
     
     
     
@@ -1471,7 +1110,6 @@ def simplify_sched_str(
 
 
 
-
 # TODO
 def has_skippable_loop_1comp(
     prog_dict,
@@ -1639,7 +1277,7 @@ def wrongly_set_to_default_schedule(program_dict, schedule_index):
     if len(schedule_dict["execution_times"]) == 1:
         speed_up = program_dict["initial_execution_time"] / schedule_dict["execution_times"][0]
         
-        if (speed_up > 0.00099 and speed_up < 0.00101) and (not can_set_default_eval(program_dict["program_annotation"], schedule_dict)):
+        if (speed_up > 0.00099 and speed_up < 0.00101) and (can_set_default_eval(program_dict["program_annotation"], schedule_dict) == 0):
                 return True
     return False
 
@@ -2096,7 +1734,8 @@ def seperate_vector(
 def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_device="cpu", train_device="cpu"):
     
     print("loading existing batches from: " + repr_pkl_output_folder)
-    
+    print(store_device)
+    print(train_device)
     dataset = Dataset_parallel(None, max_batch_size, None, repr_pkl_output_folder=repr_pkl_output_folder, just_load_pickled_repr=True, store_device=store_device, train_device=train_device)
     
     indices = list(range(len(dataset)))
@@ -2136,14 +1775,17 @@ def get_func_repr_task(input_q, output_q):
         nb_all += len(
                 programs_dict[function_name]["schedules_list"]
             )
+        # Check whether this function should be dropped
         if drop_program(programs_dict[function_name], function_name):
             nb_dropped += len(
                 programs_dict[function_name]["schedules_list"]
             )
             dropped_funcs.append(function_name)
             continue
-
+            
+        # Get the JSON representation of the program features
         program_json = programs_dict[function_name]["program_annotation"]
+        # Extract the representation template for the datapoints
         try:
             (
                 prog_tree,
@@ -2159,14 +1801,16 @@ def get_func_repr_task(input_q, output_q):
             )
         
         except (NbAccessException, LoopsDepthException):
+            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
             nb_dropped += len(
                 programs_dict[function_name]["schedules_list"]
             )
             continue
-
+        # Get the initial execution time for the program to calculate the speedups (initial exec time / transformed exec time)
         program_exec_time = programs_dict[function_name][
             "initial_execution_time"
         ]
+        # Get the program tree footprint
         tree_footprint = get_tree_footprint(prog_tree)
         
         local_function_dict = {
@@ -2179,22 +1823,34 @@ def get_func_repr_task(input_q, output_q):
             "exec_time_list": [],
             "func_id": [],
         }
-
+        # For each schedule (sequence of transformations) collected for this function
         for schedule_index in range(len(programs_dict[function_name]['schedules_list'])):
+            
+            # Get the schedule JSON representation
             schedule_json = programs_dict[function_name]['schedules_list'][schedule_index]
+            
+            # Get the transformed execution time
             sched_exec_time = np.min(schedule_json['execution_times'])
+            
+            # Check if this schedule should be dropped
             if drop_schedule(programs_dict[function_name], schedule_index) or (not sched_exec_time):
                 nb_dropped += 1
                 nb_pruned += 1
                 continue
-            
+            # Calculate the speed up obtained from applying the list of transformations spesified by the schedule
             sched_speedup = program_exec_time / sched_exec_time
-
+            
+            # Check whether we can set a default value for this speedup through the can_set_default_eval function.
             def_sp = can_set_default_eval(programs_dict[function_name]["program_annotation"], schedule_json)
+            
+            # If the function returns 0, this means no default value was spesified
             if def_sp > 0:
                 sched_speedup = def_sp
-
+                
+            # Check whether we can clip the obtained speedup
             sched_speedup = speedup_clip(sched_speedup)
+            
+            # Fill the obtained template with the corresponsing schedule features
             try:
                 comps_tensor, loops_tensor = get_schedule_representation(
                     program_json,
@@ -2213,10 +1869,11 @@ def get_func_repr_task(input_q, output_q):
                 self.nb_dropped += 1
                 self.nb_dropped_random_matrix += 1
                 continue
-
+            # Get information about this datapoint (memory use, execution time...)
             datapoint_attributes = get_datapoint_attributes(
                 function_name, programs_dict[function_name], schedule_index, tree_footprint)
-
+            
+            # Add each part of the input to the local_function_dict to be sent to the parent process
             local_function_dict['comps_tensor_list'].append(comps_tensor)
             local_function_dict['loops_tensor_list'].append(loops_tensor)
             local_function_dict['datapoint_attributes_list'].append(

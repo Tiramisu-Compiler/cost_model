@@ -1,22 +1,24 @@
 experiment:
-    name: "bidirectional_static_input_nn"
-    base_path: "/data/kb4083/model_release/release_code"
+    name: "release_code_model"
+    base_path: "/data/kb4083/model_release/cost_model"
 
 # /data/kb4083/datasets/sample_20m_test.pkl
 # /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
 # /data/mm12191/datasets/benchmarks_mats1.pkl
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/dataset_expr_batch550000-838143_cleaned_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/dataset_expr_batch550000-838143_cleaned_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/cleaned_str/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/cleaned_str/dataset_expr_batch550000-838143_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "dataset_factorization"
     batch_size: 1024
+    nb_processes: 128
 
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 500
+    gpu: "cuda:7"
 
 testing:
     datasets: # choose from valid, bench.
@@ -26,10 +28,10 @@ testing:
 
 wandb:
     use_wandb: True
-    project: "recursive_lstm"
+    project: "release_model"
     
 model: 
-    input_size: 880
+    input_size: 890
     comp_embed_layer_sizes:
         - 600
         - 350

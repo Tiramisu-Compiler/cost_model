@@ -39,11 +39,16 @@ def main(config: RecursiveLSTMConfig):
     )
     for param in model.parameters():
         param.requires_grad = True
+    
     train_ds, train_bl, train_indices= load_pickled_repr(repr_pkl_output_folder= os.path.join(config.experiment.base_path ,'pickled/pickled_')+Path(config.data_generation.train_dataset_file).parts[-1][:-4],
                                           max_batch_size = 1024, store_device=config.training.gpu, train_device=config.training.gpu)
-
+    del train_ds.programs_dict
+    del train_ds.X
     val_ds, val_bl, val_indices= load_pickled_repr(repr_pkl_output_folder=os.path.join(config.experiment.base_path ,'pickled/pickled_')+Path(config.data_generation.valid_dataset_file).parts[-1][:-4],
                                           max_batch_size = 1024, store_device=config.training.gpu, train_device=config.training.gpu)
+    
+    del val_ds.programs_dict
+    del val_ds.X
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(
@@ -58,8 +63,10 @@ def main(config: RecursiveLSTMConfig):
         wandb.config = dict(config)
         wandb.watch(model)
 
-
+    bl_dict={'train':train_bl, 'val':val_bl}
     # Training
+    
+    
     print("Training the model")
     train_model(
         config=config,

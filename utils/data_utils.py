@@ -667,26 +667,6 @@ class Dataset_parallel:
             
         print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         print("about to calculate maximum length of expressions")
-        # Calculate the maximum length of an expression in the batch for padding later
-        max_exprs = 0
-        for tree_footprint in self.batches_dict:
-            max_exprs = max([max([max([len(comp) for comp in function])
-                                  for function in self.batches_dict[tree_footprint]["comps_expr_tree_list"]]), max_exprs])
-            
-        # Adding padding to the smaller expressions in the batch and calculating the lengths of exprs vector
-        for tree_footprint in self.batches_dict:
-            lengths = []
-            for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
-                lengths.append([])
-                for j in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i])):
-                    lengths[i].append(len(
-                        self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j]))
-                    self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j].extend(
-                        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
-                self.batches_dict[tree_footprint]["comps_expr_tree_list"][i] = torch.tensor(
-                    [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]])
-            self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"] = torch.tensor(
-                lengths)
 
         storing_device = torch.device(store_device)
         print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
@@ -700,7 +680,6 @@ class Dataset_parallel:
                     self.batches_dict[tree_footprint]["datapoint_attributes_list"],
                     self.batches_dict[tree_footprint]["comps_tensor_list"],
                     self.batches_dict[tree_footprint]["comps_expr_tree_list"],
-                    self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
                     self.batches_dict[tree_footprint]["loops_tensor_list"],
                     self.batches_dict[tree_footprint]["speedups_list"],
                 )
@@ -711,7 +690,6 @@ class Dataset_parallel:
                 self.batches_dict[tree_footprint]["datapoint_attributes_list"],
                 self.batches_dict[tree_footprint]["comps_tensor_list"],
                 self.batches_dict[tree_footprint]["comps_expr_tree_list"],
-                self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"],
                 self.batches_dict[tree_footprint]["loops_tensor_list"],
                 self.batches_dict[tree_footprint]["speedups_list"],
             ) = zip(*zipped)
@@ -743,8 +721,7 @@ class Dataset_parallel:
                         vectors.to(storing_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
                         third_part.to(storing_device).view(batch_size, num_comps, -1),
                         torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
-                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
-                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list_lengths"][ chunk: chunk + max_batch_size ], 0,).to(storing_device),
+                        [torch.tensor(func_comps[i]).to(storing_device) for func_comps in self.batches_dict[tree_footprint]["comps_expr_tree_list"][ chunk: chunk + max_batch_size] for i in range(num_comps)],
                     )
                 )
                 self.batched_Y.append(

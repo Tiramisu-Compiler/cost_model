@@ -40,15 +40,31 @@ def main(config: RecursiveLSTMConfig):
     for param in model.parameters():
         param.requires_grad = True
     
-    train_ds, train_bl, train_indices= load_pickled_repr(repr_pkl_output_folder= os.path.join(config.experiment.base_path ,'pickled/pickled_')+Path(config.data_generation.train_dataset_file).parts[-1][:-4],
-                                          max_batch_size = 1024, store_device=config.training.gpu, train_device=config.training.gpu)
-    del train_ds.programs_dict
-    del train_ds.X
-    val_ds, val_bl, val_indices= load_pickled_repr(repr_pkl_output_folder=os.path.join(config.experiment.base_path ,'pickled/pickled_')+Path(config.data_generation.valid_dataset_file).parts[-1][:-4],
-                                          max_batch_size = 1024, store_device=config.training.gpu, train_device=config.training.gpu)
-    
-    del val_ds.programs_dict
-    del val_ds.X
+    path = os.path.join(
+        config.experiment.base_path,
+        "dataset_new/train",
+        f"{config.data_generation.dataset_name}_1.pt",
+    )
+    train_device = torch.device(train_device)
+    with open(path, "rb") as file:
+        train_bl_1 = torch.load(path, map_location=train_device)
+    path = os.path.join(
+        config.experiment.base_path,
+        "dataset_new/train",
+        f"{config.data_generation.dataset_name}_2.pt",
+    )
+    train_device = torch.device(train_device)
+    with open(path, "rb") as file:
+        train_bl_2 = torch.load(path, map_location='cpu')
+    print("loaded training")
+    path = os.path.join(
+        config.experiment.base_path,
+        "dataset_new/valid",
+        f"{config.data_generation.dataset_name}.pt",
+    )
+    with open(path, "rb") as file:
+        val_bl = torch.load(path, map_location='cpu')
+        
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(
@@ -63,7 +79,7 @@ def main(config: RecursiveLSTMConfig):
         wandb.config = dict(config)
         wandb.watch(model)
 
-    bl_dict={'train':train_bl, 'val':val_bl}
+    bl_dict = {"train": train_bl_1+ train_bl_2, "val": val_bl}
     # Training
     
     

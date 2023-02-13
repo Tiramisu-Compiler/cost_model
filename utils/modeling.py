@@ -30,7 +30,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         drops=[0.225, 0.225, 0.225, 0.225],
         output_size=1,
         lstm_embedding_size=100,
-        expr_embed_size=50,
+        expr_embed_size=100,
         loops_tensor_size=20,
         train_device="cpu",
         num_layers=1,
@@ -164,12 +164,10 @@ class Model_Recursive_LSTM_v2(nn.Module):
     def forward(self, tree_tensors):
         tree, comps_tensor_first_part, comps_tensor_vectors, comps_tensor_third_part, loops_tensor, functions_comps_expr_tree = tree_tensors
         
-        batch_size, num_comps, __dict__ = comps_tensor_first_part.shape
+        batch_size, num_comps, len_sequence, len_vector = functions_comps_expr_tree.shape
         
         # expressions embedding layer
-        x = [vec.to(self.train_device) for vec in functions_comps_expr_tree]
-        x = [vec.float() for vec in x]
-        x = nn.utils.rnn.pack_sequence(x, enforce_sorted=False)
+        x = functions_comps_expr_tree.view(batch_size* num_comps, len_sequence, len_vector)
         _, (expr_embedding, _) = self.exprs_embed(x)
         expr_embedding = expr_embedding.permute(1, 0, 2).reshape(
             batch_size * num_comps, -1

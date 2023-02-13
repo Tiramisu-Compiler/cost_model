@@ -575,6 +575,7 @@ class Dataset_parallel:
 #         self.batched_datapoint_attributes = []
         # number of loaded datapoints
         self.nb_datapoints = 0
+        self.gpu_fitted_batches_index = -1
         
         processes_output_list = []
         if just_load_pickled_repr: #just load the existing repr
@@ -667,7 +668,16 @@ class Dataset_parallel:
             
         print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         print("about to calculate maximum length of expressions")
+        max_exprs = 51
 
+        for tree_footprint in tqdm(self.batches_dict):
+            for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
+                for j in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i])):
+                    self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j].extend(
+                        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
+                self.batches_dict[tree_footprint]["comps_expr_tree_list"][i] = torch.tensor(
+                    [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]]).float()
+                
         storing_device = torch.device(store_device)
         print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         print("Batching ...")
@@ -700,6 +710,7 @@ class Dataset_parallel:
                 if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.9):
                     
                     print( "GPU memory on " + str(storing_device) + " nearly full, switching to CPU memory" )
+                    self.gpu_fitted_batches_index = len(self.batched_X)
                     storing_device = torch.device("cpu")
                 
 #                 self.batched_datapoint_attributes.append(
@@ -721,7 +732,7 @@ class Dataset_parallel:
                         vectors.to(storing_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
                         third_part.to(storing_device).view(batch_size, num_comps, -1),
                         torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
-                        [torch.tensor(func_comps[i]).to(storing_device) for func_comps in self.batches_dict[tree_footprint]["comps_expr_tree_list"][ chunk: chunk + max_batch_size] for i in range(num_comps)],
+                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][chunk : chunk + max_batch_size],0).to(storing_device),
                     )
                 )
                 self.batched_Y.append(
@@ -731,7 +742,8 @@ class Dataset_parallel:
                         ]
                     ).to(storing_device)
                 )
-
+        if self.gpu_fitted_batches_index == -1:
+            self.gpu_fitted_batches_index = len(self.batched_X)
         # shuffling batches to avoid having the same footprint in consecutive batches
         zipped = list(
             zip(
@@ -1889,4 +1901,4 @@ def load_data_parallel(train_val_dataset_file, max_batch_size=2048, nb_processes
         
     print("Data loaded")
     print("Size: "+str(len(batches_list))+" batches")
-    return dataset, batches_list, indices
+    return dataset, batches_list, indices, dataset.gpu_fitted_batches_index

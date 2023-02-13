@@ -70,7 +70,7 @@ def train_model(
                     inputs[2].to(train_device),
                     inputs[3].to(train_device),
                     inputs[4].to(train_device),
-                    [vec.to(train_device) for vec in inputs[5]],
+                    inputs[5].to(train_device),
                 )
                 labels = labels.to(train_device)
 

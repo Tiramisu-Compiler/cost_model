@@ -45,7 +45,7 @@ def main(config: RecursiveLSTMConfig):
         "dataset_new/train",
         f"{config.data_generation.dataset_name}_1.pt",
     )
-    train_device = torch.device(train_device)
+    train_device = torch.device(config.training.gpu)
     with open(path, "rb") as file:
         train_bl_1 = torch.load(path, map_location=train_device)
     path = os.path.join(

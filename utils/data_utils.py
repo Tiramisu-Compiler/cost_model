@@ -1350,9 +1350,9 @@ def get_expr_repr(expr, comp_type):
         elif(expr == "min"):
             expr_vector = [0, 0, 0, 0, 0, 1, 0, 0]
         elif(expr == "max"):
-            expr_vector = [0, 0, 0, 1, 0, 0, 1, 0]
+            expr_vector = [0, 0, 0, 0, 0, 0, 1, 0]
         else:
-            expr_vector = [0, 0, 0, 1, 0, 0, 0, 1]
+            expr_vector = [0, 0, 0, 0, 0, 0, 0, 1]
         
         comp_type_vector = []
         if(comp_type == "int32"):

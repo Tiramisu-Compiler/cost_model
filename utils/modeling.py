@@ -2,24 +2,6 @@ from unicodedata import bidirectional
 import torch
 from torch import nn
 from utils.data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
-#TODO seprate vectors when loading the data
-def seperate_vector(
-    X: torch.Tensor, num_transformations: int = 4, pad: bool = True, pad_amount: int = 5
-) -> torch.Tensor:
-    batch_size, _ = X.shape
-    first_part = X[:, :33]
-    second_part = X[:, 33 : 33 + MAX_TAGS * num_transformations]
-    third_part = X[:, 33 + MAX_TAGS * num_transformations :]
-    vectors = []
-    for i in range(num_transformations):
-        vector = second_part[:, MAX_TAGS * i : MAX_TAGS * (i + 1)].reshape(batch_size, 1, -1)
-        vectors.append(vector)
-
-    if pad:
-        for i in range(pad_amount):
-            vector = torch.zeros_like(vector)
-            vectors.append(vector)
-    return (first_part, torch.cat(vectors[0:], dim=1), third_part)
 
 # Define the architecture of our cost model
 class Model_Recursive_LSTM_v2(nn.Module):
@@ -174,12 +156,8 @@ class Model_Recursive_LSTM_v2(nn.Module):
         )
         
         # computation embbedding layer
-        # x = comps_tensor.to(self.train_device)
         batch_size, num_comps, __dict__ = comps_tensor_first_part.shape
-        # x = x.view(batch_size * num_comps, -1)
-        # (first_part, vectors, third_part) = seperate_vector(
-        #     x, num_transformations=4, pad=False
-        # )
+
         first_part = comps_tensor_first_part.to(self.train_device).view(batch_size * num_comps, -1)
         vectors = comps_tensor_vectors.to(self.train_device) # it's shape is (batch_size * num_comps, number of vectors)
         third_part = comps_tensor_third_part.to(self.train_device).view(batch_size * num_comps, -1)

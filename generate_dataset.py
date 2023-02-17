@@ -18,7 +18,7 @@ def generate_datasets(conf):
     val_ds, val_bl, val_indices, gpu_fitted_batches_index = load_data_parallel(conf.data_generation.valid_dataset_file,max_batch_size = 1024,
                                        nb_processes=conf.data_generation.nb_processes,
                                        repr_pkl_output_folder=os.path.join(conf.experiment.base_path ,'pickled/pickled_')+Path(conf.data_generation.valid_dataset_file).parts[-1][:-4],
-                                       overwrite_existing_pkl=False, store_device="cpu", train_device="cpu")
+                                       overwrite_existing_pkl=True, store_device=config.training.gpu, train_device=config.training.gpu)
     validation_dataset_path = os.path.join(conf.experiment.base_path, "dataset_new/valid")
     
     if not os.path.exists(validation_dataset_path):
@@ -36,7 +36,7 @@ def generate_datasets(conf):
 #     Training
     train_ds, train_bl, train_indices, gpu_fitted_batches_index = load_data_parallel(conf.data_generation.train_dataset_file,max_batch_size = 1024,
                                        nb_processes=conf.data_generation.nb_processes,                                       repr_pkl_output_folder = os.path.join(conf.experiment.base_path ,'pickled/pickled_') + Path(conf.data_generation.train_dataset_file).parts[-1][:-4],
-                                       overwrite_existing_pkl=False, store_device="cpu", train_device="cpu")
+                                       overwrite_existing_pkl=True, store_device=conf.training.gpu, train_device=conf.training.gpu)
     training_dataset_path = os.path.join(conf.experiment.base_path, "dataset_new/train")
     
     train_bl_1 = train_bl[:gpu_fitted_batches_index]

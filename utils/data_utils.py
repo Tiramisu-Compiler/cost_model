@@ -47,7 +47,7 @@ MAX_TAGS = 8
 def get_representation_template(program_dict, max_depth, train_device="cpu"):
     # Set the max and min number of accesses allowed 
     max_accesses = 15
-    min_accesses = 1
+    min_accesses = 0
 
     comps_repr_templates_list = []
     comps_expr_repr_templates_list = []
@@ -85,6 +85,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
 
         iterators_repr = []
         # Add a representation of each loop of this computation
+        
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
             # TODOF does this work when iterators have the same name?
             iterator_dict = program_json["iterators"][iterator_name]
@@ -120,18 +121,19 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         iterators_repr.append(c_code + "-TransformationTagsEnd")
         
         # Adding initial constraint matrix
+        # Remove the 1 mask from constraint matrix. Not necessary.
         iterators_repr.append(c_code+'-OgConstraintMatrixStart')
-        iterators_repr.extend(['C']*((max_depth+1)*((max_depth+1)*2)-2))
+        iterators_repr.extend(['OgC']*((max_depth*max_depth*2)-2))
         iterators_repr.append(c_code+'-OgConstraintMatrixEnd')
         
-        # Adding initial constraint matrix
+        # Adding initial constraint vector
         iterators_repr.append(c_code+'-OgConstraintVectorStart')
         iterators_repr.extend(['V']*(max_depth*2-2))
         iterators_repr.append(c_code+'-OgConstraintVectorEnd')
         
         # Adding transformed constraint matrix
         iterators_repr.append(c_code+'-ConstraintMatrixStart')
-        iterators_repr.extend(['C']*((max_depth+1)*((max_depth+1)*2)-2))
+        iterators_repr.extend(['C']*((max_depth*max_depth*2)-2))
         iterators_repr.append(c_code+'-ConstraintMatrixEnd')
                               
         # Add the loop representation to the computation vector 
@@ -144,7 +146,6 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         write_access_repr = [
             comp_dict["write_buffer_id"] + 1
         ] + padded_write_matrix.flatten().tolist()
-
         comp_repr_template.extend(write_access_repr)
 
         # Pad the read access matrix and add it to the representation
@@ -167,11 +168,9 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         read_accesses_repr.extend(
             [0] * access_repr_len * (max_accesses - len(comp_dict["accesses"]))
         )
-
         comp_repr_template.extend(read_accesses_repr)
-
-        comps_repr_templates_list.append(comp_repr_template)
         
+        comps_repr_templates_list.append(comp_repr_template)
         # Create a mapping between the features and their position in the representation
         comps_indices_dict[comp_name] = comp_index
         for j, element in enumerate(comp_repr_template):
@@ -231,8 +230,6 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         loops_placeholders_indices_dict,
         comps_expr_repr_templates_list,
     )
-
-
 
 # TODO add description
 def update_tree_atributes(node, loops_indices_dict, comps_indices_dict, train_device="cpu"):
@@ -381,9 +378,9 @@ def get_schedule_representation(
         
         nb_mat_elements = ogc_end[1] - ogc_start[1] + 1
         
-        max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
+        assert(max_depth*max_depth*2 == nb_mat_elements)
         
-        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth_it).flatten().tolist()
+        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth).flatten().tolist()
                               
         ogv_start = comps_placeholders_indices_dict[c_code+'-OgConstraintVectorStart']
         
@@ -398,10 +395,10 @@ def get_schedule_representation(
         c_end = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixEnd']
         
         nb_mat_elements = c_end[1] - c_start[1] + 1
+
+        assert(max_depth*max_depth*2 == nb_mat_elements)
         
-        max_depth_it = int(np.sqrt(nb_mat_elements / 2)) - 1
-        
-        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth_it).flatten().tolist()
+        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth).flatten().tolist()
         
 
     # Fill the loop representation
@@ -495,7 +492,7 @@ def get_schedule_representation(
         
         p_index = loops_placeholders_indices_dict[l_code + "Fused"]
         loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name]["fused"]
-        
+    # Check if any iterators were removed because of fusion
     if (len(program_json["iterators"])>len(program_iterators)):
         removed_iterators = list(set(program_json["iterators"]) - set(program_iterators))
         for loop_name in removed_iterators:
@@ -569,8 +566,6 @@ class Dataset_parallel:
         self.nb_pruned = 0
         # List of dropped functions 
         self.dropped_funcs = []
-        # TODO remove this unused variable
-        self.function_names_map = dict()
 #         # Saved data attributes for analysis and expirements TODO maybe remove this
 #         self.batched_datapoint_attributes = []
         # number of loaded datapoints
@@ -648,8 +643,6 @@ class Dataset_parallel:
                 return 0
             
         nb_all = 0
-        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        print("all processes are done. Updating batches_dict")
         for function_name, nb_dropped, nb_pruned, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
                 tree_indices_to_device(node, train_device=store_device)
@@ -666,8 +659,6 @@ class Dataset_parallel:
             self.nb_datapoints += len(local_function_dict['speedups_list'])
             nb_all += nb_all_local
             
-        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        print("about to calculate maximum length of expressions")
         max_exprs = 51
 
         for tree_footprint in tqdm(self.batches_dict):
@@ -679,8 +670,7 @@ class Dataset_parallel:
                     [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]]).float()
                 
         storing_device = torch.device(store_device)
-        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        print("Batching ...")
+
         # For each tree footprint in the dataset TODO explain what a tree footprint is
         for tree_footprint in tqdm(self.batches_dict):
 
@@ -707,7 +697,7 @@ class Dataset_parallel:
             # Split the data into batches of size max_batch_size
             for chunk in range( 0, len(self.batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
                 # Check GPU memory in order to avoid Out of memory error
-                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.9):
+                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.80):
                     
                     print( "GPU memory on " + str(storing_device) + " nearly full, switching to CPU memory" )
                     self.gpu_fitted_batches_index = len(self.batched_X)
@@ -1374,8 +1364,8 @@ def get_tree_expr_repr(node, comp_type):
         return expr_tensor
     
 def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth):
+    
     iterators_list = program_json["computations"][comp_name]["iterators"]
-    transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)
     result = []
     for i in iterators_list:
         for j in range(2):
@@ -1383,14 +1373,12 @@ def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, 
                 result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
             else:
                 result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
-                
-    result = np.c_[np.ones(len(result)), result]
-    result = np.r_[[np.ones(len(result[0]))], result]
+    result = np.array(result)            
     result = np.pad(
         result,
         [
-            (0, (max_depth + 1)*2 - result.shape[0]),
-            (0, max_depth + 1 - result.shape[1]),
+            (0, (max_depth)*2 - result.shape[0]),
+            (0, max_depth - result.shape[1]),
         ],
         mode="constant",
         constant_values=0,
@@ -1432,18 +1420,17 @@ def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_na
                 result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
     inverse = np.linalg.inv(transformation_matrix)
     result = np.matmul(result, inverse)
-    
-    result = np.c_[np.ones(len(result)), result]
-    result = np.r_[[np.ones(len(result[0]))], result]
+    result = np.array(result)
     result = np.pad(
         result,
         [
-            (0, (max_depth + 1)*2 - result.shape[0]),
-            (0, max_depth + 1 - result.shape[1]),
+            (0, (max_depth)*2 - result.shape[0]),
+            (0, max_depth - result.shape[1]),
         ],
         mode="constant",
         constant_values=0,
     )
+    
     return result
 
 def format_bound(iterator_name, bound, iterators_list, is_lower):
@@ -1795,6 +1782,7 @@ def get_func_repr_task(input_q, output_q):
                 programs_dict[function_name]["schedules_list"]
             )
             continue
+        
         # Get the initial execution time for the program to calculate the speedups (initial exec time / transformed exec time)
         program_exec_time = programs_dict[function_name][
             "initial_execution_time"
@@ -1861,7 +1849,7 @@ def get_func_repr_task(input_q, output_q):
             # Get information about this datapoint (memory use, execution time...)
             datapoint_attributes = get_datapoint_attributes(
                 function_name, programs_dict[function_name], schedule_index, tree_footprint)
-            
+                
             # Add each part of the input to the local_function_dict to be sent to the parent process
             local_function_dict['comps_tensor_list'].append(comps_tensor)
             local_function_dict['loops_tensor_list'].append(loops_tensor)
@@ -1877,7 +1865,6 @@ def get_func_repr_task(input_q, output_q):
                            nb_datapoints, tree_footprint, local_function_dict,nb_all))
     
     pkl_part_filename = repr_pkl_output_folder + '/pickled_representation_part_'+str(process_id)+'.pkl'
-#     print(pkl_part_filename)
     with open(pkl_part_filename, 'wb') as f:
         pickle.dump(local_list, f, protocol=pickle.HIGHEST_PROTOCOL)
     output_q.put((process_id, pkl_part_filename))

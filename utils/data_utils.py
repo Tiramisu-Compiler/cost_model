@@ -265,7 +265,8 @@ def get_schedule_representation(
     loops_repr_templates_list,
     comps_placeholders_indices_dict,
     loops_placeholders_indices_dict,
-    max_depth,
+    function_name,
+    max_depth,   
 ):
     
     # Create a copy of the templates to avoid modifying the values for other schedules
@@ -424,6 +425,10 @@ def get_schedule_representation(
                 comp_schedule_dict["tiling"]["tiling_dims"]
             ):
                 loop_schedules_dict[tiled_loop]["tiled"] = 1
+#                 if(not ((loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
+#                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
+#                 ) ))):
+#                     print(f" program {function_name} json is: {program_json} \n schedule_json is {schedule_json} \n ")
                 assert (loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
                 ))
@@ -434,7 +439,7 @@ def get_schedule_representation(
         # Check whether unrolling was applied 
         if comp_schedule_dict["unrolling_factor"]:
             comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
-#             comp_innermost_loop = computations_dict[comp_name]["iterators"][-1]
+            
             loop_schedules_dict[comp_innermost_loop]["unrolled"] = 1
                 
             assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or                                                                                           loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
@@ -459,7 +464,7 @@ def get_schedule_representation(
             loop_schedules_dict[fused_loop1]["fused"] = 1
             loop_schedules_dict[fused_loop2]["fused"] = 1
             
-    program_iterators = get_comp_iterators_from_tree_struct(schedule_json, comp_name)
+    
     # Get the index of each feature in the loop representation and replace it with the the information obtained from the schedule
     for loop_name in program_json["iterators"]:
         l_code = "L" + loop_name
@@ -492,9 +497,10 @@ def get_schedule_representation(
         
         p_index = loops_placeholders_indices_dict[l_code + "Fused"]
         loops_repr[p_index[0]][p_index[1]] = loop_schedules_dict[loop_name]["fused"]
+    comp_transformed_iterators = get_comp_iterators_from_tree_struct(schedule_json, comp_name)    
     # Check if any iterators were removed because of fusion
-    if (len(program_json["iterators"])>len(program_iterators)):
-        removed_iterators = list(set(program_json["iterators"]) - set(program_iterators))
+    if (len(program_json["iterators"])>len(comp_transformed_iterators)):
+        removed_iterators = list(set(program_json["iterators"]) - set(comp_transformed_iterators))
         for loop_name in removed_iterators:
             l_code = "L" + loop_name
 
@@ -1836,7 +1842,9 @@ def get_func_repr_task(input_q, output_q):
                     loops_repr_templates_list,
                     comps_placeholders_indices_dict,
                     loops_placeholders_indices_dict,
+                    function_name,
                     max_depth=5,
+                    
                 )
             except NbTranformationException:
                     # If the number of transformations exceeded the specified max, we skip this schedule

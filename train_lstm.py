@@ -9,7 +9,19 @@ from utils.config import *
 from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
-
+def load_model_weights(model_weights_path, config):
+    # Get model information from the cost_model repo
+    # Define the model
+    model = Model_Recursive_LSTM_v2(
+        input_size=config.model.input_size,
+        comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
+        drops=list(config.model.drops),
+        loops_tensor_size=8,
+        train_device=config.training.gpu,
+    )
+    # Load the trained weights
+    model.load_state_dict(torch.load(model_weights_path))
+    return model
 @hydra.main(config_path="conf", config_name="config")
 def main(config: RecursiveLSTMConfig):
     # Defining logger
@@ -57,7 +69,7 @@ def main(config: RecursiveLSTMConfig):
     with open(path, "rb") as file:
         train_bl_2 = torch.load(path, map_location='cpu')
         
-    print("loaded training")
+    
     path = os.path.join(
         config.experiment.base_path,
         "dataset_new/valid",
@@ -82,12 +94,13 @@ def main(config: RecursiveLSTMConfig):
 
     bl_dict = {"train": train_bl_1+ train_bl_2, "val": val_bl}
     # Training
-    
+    original_model = load_model_weights("/data/kb4083/cost_model/weights/best_model_release_code_model_555f.pt", config)
     
     print("Training the model")
     train_model(
         config=config,
         model=model,
+        original_model=original_model,
         criterion=criterion,
         optimizer=optimizer,
         max_lr=config.training.lr,

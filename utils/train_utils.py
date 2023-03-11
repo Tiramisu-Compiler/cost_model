@@ -22,6 +22,7 @@ def mape_criterion(inputs, targets):
 def train_model(
     config,
     model,
+    original_model,
     criterion,
     optimizer,
     max_lr,
@@ -44,8 +45,12 @@ def train_model(
     for item in dataloader["val"]:
         label = item[1]
         dataloader_size["val"] += label.shape[0]
+        
     model = model.to(train_device)
-
+    
+    original_model = original_model.to(train_device)
+    original_model.eval()
+    
     scheduler = OneCycleLR(
         optimizer,
         max_lr=max_lr,
@@ -72,13 +77,18 @@ def train_model(
                     inputs[4].to(train_device),
                     inputs[5].to(train_device),
                 )
+                with torch.no_grad():
+                    original_model_predictions = original_model(inputs)
+                    original_model_predictions = original_model_predictions * 0
+                    labels = labels.to(train_device)
+                    
+                    labels = abs(labels - original_model_predictions)
                 labels = labels.to(train_device)
-
+                
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == "train"):
                     outputs = model(inputs)
-                    # print(outputs.get_device(),labels.get_device())
                     assert outputs.shape == labels.shape
                     loss = criterion(outputs, labels)
 
@@ -90,7 +100,6 @@ def train_model(
                 running_loss += loss.item() * labels.shape[0]
                 labels = labels.to(original_device)
                 epoch_end = time.time()
-            print(phase)
             epoch_loss = running_loss / dataloader_size[phase]
 
             if phase == "val":

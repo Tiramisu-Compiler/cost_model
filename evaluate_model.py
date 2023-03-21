@@ -12,14 +12,13 @@ from utils.train_utils import *
 train_device = torch.device("cuda")
 store_device = torch.device("cuda")
 
-def define_model(input_size=776):
-    print("Defining the model")
+def define_model():
     model = Model_Recursive_LSTM_v2(
-        input_size=input_size,
-        comp_embed_layer_sizes=[600, 350, 200, 180],
-        drops=[0.050] * 5,
-        train_device="cuda:0",
-        loops_tensor_size=20,
+        input_size=conf.model.input_size,
+        comp_embed_layer_sizes=list(conf.model.comp_embed_layer_sizes),
+        drops=list(conf.model.drops),
+        loops_tensor_size=8,
+        train_device=conf.training.gpu,
     ).to(train_device)
     return model
 
@@ -44,12 +43,8 @@ def main(conf):
     model = define_model(input_size=776)
     model.load_state_dict(
         torch.load(
-            os.path.join(
-                conf.experiment.base_path,
-                "weights/",
-                conf.testing.checkpoint,
-            ),
-            map_location=train_device,
+            conf.testing.model_weights_path,
+            map_location=conf.training.gpu,
         )
     )
     for dataset in conf.testing.datasets:

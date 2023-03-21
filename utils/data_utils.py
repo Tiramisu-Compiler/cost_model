@@ -23,6 +23,9 @@ class NbTranformationException(Exception):
 class RandomMatrix(Exception):
     pass
 
+class ContradictingTilingParameters(Exception):
+    pass
+
 # An exception to limit the maximum number of read-write accesses. 
 class NbAccessException(Exception):
     pass
@@ -35,7 +38,7 @@ class LoopsDepthException(Exception):
 MAX_NUM_TRANSFORMATIONS = 4
 
 # Maximum size of the tags vector representing each transformation
-MAX_TAGS = 8
+MAX_TAGS = 16
 
 # Enumeration for the different exploration algorithms used to generate the data
 # class Exploration_method(int, enum.Enum):
@@ -219,7 +222,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     orig_tree_structure = no_sched_json["tree_structure"]
     tree_annotation = copy.deepcopy(orig_tree_structure)
     
-   
+    
     prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device=train_device)
     
     return (
@@ -429,9 +432,10 @@ def get_schedule_representation(
 #                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
 #                 ) ))):
 #                     print(f" program {function_name} json is: {program_json} \n schedule_json is {schedule_json} \n ")
-                assert (loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
+                if (not (loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
-                ))
+                ))):
+                    raise ContradictingTilingParameters
                 loop_schedules_dict[tiled_loop]["tile_factor"] = int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
                 )
@@ -568,6 +572,9 @@ class Dataset_parallel:
         # Number of all the dropped schedules
         self.nb_dropped = 0
         self.nb_dropped_random_matrix = 0
+        self.nb_dropped_contradicting_tiling_params = 0
+        self.nb_dropped_transformation_list_issue = 0
+        
         # Number of dropped schedules due to the drop schedule function only
         self.nb_pruned = 0
         # List of dropped functions 
@@ -649,7 +656,7 @@ class Dataset_parallel:
                 return 0
             
         nb_all = 0
-        for function_name, nb_dropped, nb_pruned, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
+        for function_name, nb_dropped, nb_pruned, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
                 tree_indices_to_device(node, train_device=store_device)
             self.batches_dict[tree_footprint] = self.batches_dict.get(tree_footprint, {'tree': local_function_dict['tree'], 'comps_tensor_list': [], 'loops_tensor_list': [ ], 'datapoint_attributes_list': [], 'comps_expr_tree_list': [], 'speedups_list': [], 'exec_time_list': [], "func_id": []})
@@ -661,6 +668,10 @@ class Dataset_parallel:
             self.batches_dict[tree_footprint]['speedups_list'].extend(local_function_dict['speedups_list'])
 
             self.nb_dropped += nb_dropped
+            self.nb_dropped_random_matrix += nb_dropped_random_matrix
+            self.nb_dropped_contradicting_tiling_params += nb_dropped_contradicting_tiling_params
+            self.nb_dropped_transformation_list_issue += nb_dropped_transformation_list_issue
+    
             self.nb_pruned += nb_pruned
             self.nb_datapoints += len(local_function_dict['speedups_list'])
             nb_all += nb_all_local
@@ -676,10 +687,9 @@ class Dataset_parallel:
                     [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]]).float()
                 
         storing_device = torch.device(store_device)
-
+        
         # For each tree footprint in the dataset TODO explain what a tree footprint is
         for tree_footprint in tqdm(self.batches_dict):
-
             # shuffling the lists inside each footprint to avoid having batches with very low program diversity
             zipped = list(
                 zip(
@@ -716,6 +726,7 @@ class Dataset_parallel:
 #                 )
                 # Here we separate the comps tensor to get the transformation vectors
                 x = torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device)
+        
                 batch_size, num_comps, __dict__ = x.shape
                 x = x.view(batch_size * num_comps, -1)
                 (first_part, vectors, third_part) = seperate_vector(
@@ -756,11 +767,7 @@ class Dataset_parallel:
         ) = zip(*zipped)
 
         print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}" )
-        print( f"Number of dropped {self.nb_dropped}, all {nb_all}" )
-        del self.batches_dict
-        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        gc.collect()
-        print("memory usage:", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        print( f"Number of dropped {self.nb_dropped}, Number of dropped points from RandomMatrix exception {self.nb_dropped_random_matrix}, Number of dropped points from ContradictingTilingParameters exception {self.nb_dropped_contradicting_tiling_params}, Number of dropped points from LinAlgError exception {self.nb_dropped_transformation_list_issue}, all the points before processing {nb_all}" )
 
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -1424,7 +1431,9 @@ def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_na
                 result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
             else:
                 result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
+    
     inverse = np.linalg.inv(transformation_matrix)
+        
     result = np.matmul(result, inverse)
     result = np.array(result)
     result = np.pad(
@@ -1470,11 +1479,29 @@ def get_trasnformation_matrix_from_vector(transformation, matrix_size):
         assert(transformation[3] < matrix_size)
         matrix[transformation[3], transformation[3]] = -1
         
-    elif (transformation[0] == 3):
-        assert(transformation[4] < matrix_size and transformation[5] < matrix_size)
-        matrix[transformation[4], transformation[4]] = transformation[6]
-        matrix[transformation[4], transformation[5]] = transformation[7]
+    elif transformation[0] == 3:
+        # 2D Skewing
+        if transformation[6] == 0:
+            assert(transformation[4] < matrix_size and transformation[5] < matrix_size)
+            matrix[transformation[4], transformation[4]] = transformation[7]
+            matrix[transformation[4], transformation[5]] = transformation[8]
+            matrix[transformation[5], transformation[4]] = transformation[9]
+            matrix[transformation[5], transformation[5]] = transformation[10]
+        if transformation[6] > 0:
+#             assert(transformation[4] < matrix_size and transformation[5] < matrix_size and transformation[6] < matrix_size)
     
+            if not (transformation[4] < matrix_size and transformation[5] < matrix_size and transformation[6] < matrix_size):
+                raise RandomMatrix
+            matrix[transformation[4], transformation[4]] = transformation[7]
+            matrix[transformation[4], transformation[5]] = transformation[8]
+            matrix[transformation[4], transformation[6]] = transformation[9]
+            matrix[transformation[5], transformation[4]] = transformation[10]
+            matrix[transformation[5], transformation[5]] = transformation[11]
+            matrix[transformation[5], transformation[6]] = transformation[12]
+            matrix[transformation[6], transformation[4]] = transformation[13]
+            matrix[transformation[6], transformation[5]] = transformation[14]
+            matrix[transformation[6], transformation[6]] = transformation[15]
+            
     return matrix
 # transform the vectors into a series of matrices
 def get_transformation_matrix(
@@ -1494,15 +1521,21 @@ def get_schedule_str_for_pruning(program_json, sched_json):
         if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
     ]
     sched_str = ""
-#     print(f"starting for new schedules in program: {program_json}")
     for name in comp_name:
         # can probably use the feature in prog json
         transf_loop_nest = program_json["computations"][name]["iterators"].copy()
         schedule = sched_json[name]
+        if ("fusions" in sched_json and sched_json["fusions"]):
+            for fusion in sched_json["fusions"]:
+                # if this computation was involved in a fusion, we know it uses the same iterators as the computation it was fused with
+                if name in fusion:
+                    iterator_comp_name = fusion[0]
+                    transf_loop_nest = program_json["computations"][iterator_comp_name]["iterators"].copy()
+                    schedule = sched_json[iterator_comp_name]
+        
         sched_str += '{' + name + '}:'
-#         print(f"transf_loop_nest for computation: {name} is {transf_loop_nest}")
+        
         if schedule["parallelized_dim"]:
-            
             dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
             sched_str += "P(L" + str(dim_index) + ")"
 
@@ -1536,6 +1569,9 @@ def get_schedule_str_for_pruning(program_json, sched_json):
                 third_dim = schedule["tiling"]["tiling_dims"][2]
                 first_dim_index = transf_loop_nest.index(first_dim)
                 second_dim_index = transf_loop_nest.index(second_dim)
+#                 if (third_dim not in transf_loop_nest):
+#                     print(transf_loop_nest)
+#                     print(sched_json)
                 third_dim_index = transf_loop_nest.index(third_dim)
                 first_factor = schedule["tiling"]["tiling_factors"][0]
                 second_factor = schedule["tiling"]["tiling_factors"][1]
@@ -1600,6 +1636,14 @@ def get_schedule_str(program_json, sched_json):
     for name in comp_name:
         transf_loop_nest = program_json["computations"][name]["iterators"].copy()
         schedule = sched_json[name]
+        if ("fusions" in sched_json and sched_json["fusions"]):
+            for fusion in sched_json["fusions"]:
+                # if this computation was involved in a fusion, we know it uses the same iterators as the computation it was fused with
+                if name in fusion:
+                    iterator_comp_name = fusion[0]
+                    transf_loop_nest = program_json["computations"][iterator_comp_name]["iterators"].copy()
+                    schedule = sched_json[iterator_comp_name]
+                
         sched_str += '{' + name + '}:'
 
         for transformation in schedule["transformations_list"]:
@@ -1613,9 +1657,9 @@ def get_schedule_str(program_json, sched_json):
                 sched_str += "S(L" + str(transformation[4]) + ",L" + str(transformation[5]) + "," + str(transformation[6]) + "," + str(transformation[7]) + ")"
                 
         if schedule["parallelized_dim"]:
-            
             dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
             sched_str += "P(L" + str(dim_index) + ")"
+            
         if schedule["shiftings"]:    
             for shifting in schedule['shiftings']: 
                 dim_index = transf_loop_nest.index(shifting[0])
@@ -1744,6 +1788,9 @@ def get_func_repr_task(input_q, output_q):
     process_id, programs_dict, repr_pkl_output_folder, train_device = input_q.get()
     function_name_list = list(programs_dict.keys())
     nb_dropped = 0
+    nb_dropped_random_matrix = 0
+    nb_dropped_contradicting_tiling_params = 0
+    nb_dropped_transformation_list_issue = 0
     nb_pruned = 0
     nb_datapoints = 0
     nb_all=0
@@ -1844,16 +1891,24 @@ def get_func_repr_task(input_q, output_q):
                     loops_placeholders_indices_dict,
                     function_name,
                     max_depth=5,
-                    
                 )
             except NbTranformationException:
                     # If the number of transformations exceeded the specified max, we skip this schedule
-                    self.nb_dropped += 1 
+                    nb_dropped += 1 
                     continue
             except RandomMatrix :
-                self.nb_dropped += 1
-                self.nb_dropped_random_matrix += 1
+                nb_dropped += 1
+                nb_dropped_random_matrix += 1
                 continue
+            except ContradictingTilingParameters :
+                nb_dropped += 1
+                nb_dropped_contradicting_tiling_params += 1
+                continue
+            except np.linalg.LinAlgError:
+                nb_dropped += 1
+                nb_dropped_transformation_list_issue += 1
+                continue
+                
             # Get information about this datapoint (memory use, execution time...)
             datapoint_attributes = get_datapoint_attributes(
                 function_name, programs_dict[function_name], schedule_index, tree_footprint)
@@ -1869,7 +1924,7 @@ def get_func_repr_task(input_q, output_q):
             local_function_dict['speedups_list'].append(sched_speedup)
             nb_datapoints += 1
         
-        local_list.append((function_name, nb_dropped, nb_pruned,
+        local_list.append((function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned,
                            nb_datapoints, tree_footprint, local_function_dict,nb_all))
     
     pkl_part_filename = repr_pkl_output_folder + '/pickled_representation_part_'+str(process_id)+'.pkl'

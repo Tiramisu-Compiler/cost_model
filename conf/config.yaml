@@ -5,29 +5,32 @@ experiment:
 # /data/kb4083/datasets/sample_20m_test.pkl
 # /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
 # /data/mm12191/datasets/benchmarks_mats1.pkl
+# "/data/kb4083/datasets/testing_bound_type.json"
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "dataset_scalability"
+    dataset_name:  "dataset_new_data"
     batch_size: 1024
-    nb_processes: 170
+    nb_processes: 128
+
 
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 2000
-    gpu: "cuda:4"
+    gpu: "cuda:1"
+    continue_training: False
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_code_model_555f.pt"
 
 testing:
     datasets: # choose from valid, bench.
-        # - valid
-        - bench
-    checkpoint: "best_model_ACTUAL_20m_2000_scalability_experiment.pt"
+        - valid
+    
 
 wandb:
-    use_wandb: True
+    use_wandb: False
     project: "release_model"
     
 model: 

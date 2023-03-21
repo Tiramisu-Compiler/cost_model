@@ -30,6 +30,7 @@ def main(config: RecursiveLSTMConfig):
     
     # Defining the model
     logging.info("Defining the model")
+    
     model = Model_Recursive_LSTM_v2(
         input_size=config.model.input_size,
         comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
@@ -37,6 +38,9 @@ def main(config: RecursiveLSTMConfig):
         loops_tensor_size=8,
         train_device=config.training.gpu,
     )
+    if config.training.continue_training:
+        model.load_state_dict(torch.load(config.training.model_weights_path, map_location=config.training.gpu))
+        
     for param in model.parameters():
         param.requires_grad = True
     

@@ -19,7 +19,7 @@ data_generation:
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
-    max_epochs: 2000
+    max_epochs: 500
     gpu: "cuda:1"
     continue_training: False
     model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_code_model_555f.pt"
@@ -30,7 +30,7 @@ testing:
     
 
 wandb:
-    use_wandb: False
+    use_wandb: True
     project: "release_model"
     
 model: 

@@ -713,7 +713,7 @@ class Dataset_parallel:
             # Split the data into batches of size max_batch_size
             for chunk in range( 0, len(self.batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
                 # Check GPU memory in order to avoid Out of memory error
-                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.80):
+                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.75):
                     
                     print( "GPU memory on " + str(storing_device) + " nearly full, switching to CPU memory" )
                     self.gpu_fitted_batches_index = len(self.batched_X)

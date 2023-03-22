@@ -1,5 +1,5 @@
 experiment:
-    name: "data_scalability_20m"
+    name: "active_learning_new_data"
     base_path: "/data/kb4083/cost_model"
 
 # /data/kb4083/datasets/sample_20m_test.pkl
@@ -10,7 +10,7 @@ data_generation:
     train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
     valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "dataset_new_data"
+    dataset_name:  "active_learning_new_data"
     batch_size: 1024
     nb_processes: 128
 
@@ -20,9 +20,9 @@ training:
     log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 500
-    gpu: "cuda:1"
+    gpu: "cuda:4"
     continue_training: False
-    model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_code_model_555f.pt"
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_data_scalability_20m_7cab.pt"
 
 testing:
     datasets: # choose from valid, bench.

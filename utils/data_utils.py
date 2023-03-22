@@ -223,7 +223,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     tree_annotation = copy.deepcopy(orig_tree_structure)
     
     
-    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device=train_device)
+    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device=torch.device("cpu"))
     
     return (
         prog_tree,
@@ -550,6 +550,7 @@ class Dataset_parallel:
         self,
         dataset_filename,
         max_batch_size,
+        model = None,
         drop_sched_func=None,
         drop_prog_func=None,
         can_set_default_eval=None,
@@ -654,7 +655,10 @@ class Dataset_parallel:
 
             def can_set_default_eval(x, y):
                 return 0
-            
+        
+        
+        # Load the trained model
+        model = model.to(store_device)
         nb_all = 0
         for function_name, nb_dropped, nb_pruned, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
@@ -712,6 +716,7 @@ class Dataset_parallel:
             
             # Split the data into batches of size max_batch_size
             for chunk in range( 0, len(self.batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
+                
                 # Check GPU memory in order to avoid Out of memory error
                 if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.75):
                     
@@ -732,6 +737,15 @@ class Dataset_parallel:
                 (first_part, vectors, third_part) = seperate_vector(
                     x, num_transformations=4, pad=False
                 )
+                inputs = (
+                        self.batches_dict[tree_footprint]["tree"],
+                        first_part.to(storing_device).view(batch_size, num_comps, -1),
+                        vectors.to(storing_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
+                        third_part.to(storing_device).view(batch_size, num_comps, -1),
+                        torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
+                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][chunk : chunk + max_batch_size],0).to(storing_device),
+                    )
+                
                 self.batched_X.append(
                     (
                         self.batches_dict[tree_footprint]["tree"],
@@ -742,13 +756,21 @@ class Dataset_parallel:
                         torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][chunk : chunk + max_batch_size],0).to(storing_device),
                     )
                 )
-                self.batched_Y.append(
-                    torch.FloatTensor(
-                        self.batches_dict[tree_footprint]["speedups_list"][
+                # Get the correct labels
+                y = self.batches_dict[tree_footprint]["speedups_list"][
                             chunk: chunk + max_batch_size
                         ]
-                    ).to(storing_device)
+                
+                # Get the model prediciton
+                predictions = model(inputs) 
+                
+                # Calculate the error we want the model to predict
+                absolute_difference = tuple((abs(torch.FloatTensor(y).to(storing_device) - predictions)).tolist())
+                
+                self.batched_Y.append(
+                    torch.FloatTensor(absolute_difference).to(storing_device)
                 )
+        
         if self.gpu_fitted_batches_index == -1:
             self.gpu_fitted_batches_index = len(self.batched_X)
         # shuffling batches to avoid having the same footprint in consecutive batches
@@ -1757,22 +1779,22 @@ def seperate_vector(
     return (first_part, torch.cat(vectors[0:], dim=1), third_part)
 
 
-def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_device="cpu", train_device="cpu"):
+# def load_pickled_repr(repr_pkl_output_folder=None, model=None, max_batch_size = 1024, store_device="cpu", train_device="cpu"):
     
-    print("loading existing batches from: " + repr_pkl_output_folder)
-    print(store_device)
-    print(train_device)
-    dataset = Dataset_parallel(None, max_batch_size, None, repr_pkl_output_folder=repr_pkl_output_folder, just_load_pickled_repr=True, store_device=store_device, train_device=train_device)
+#     print("loading existing batches from: " + repr_pkl_output_folder)
+#     print(store_device)
+#     print(train_device)
+#     dataset = Dataset_parallel(None, max_batch_size, model=model, None, repr_pkl_output_folder=repr_pkl_output_folder, just_load_pickled_repr=True, store_device=store_device, train_device=train_device)
     
-    indices = list(range(len(dataset)))
+#     indices = list(range(len(dataset)))
  
-    batches_list=[]
-    for i in indices:
-        batches_list.append(dataset[i])
+#     batches_list=[]
+#     for i in indices:
+#         batches_list.append(dataset[i])
         
-    print("Data loaded")
-    print("Size: "+str(len(batches_list))+" batches")
-    return dataset, batches_list, indices
+#     print("Data loaded")
+#     print("Size: "+str(len(batches_list))+" batches")
+#     return dataset, batches_list, indices
 
 def tree_indices_to_device(node, train_device):
     node['loop_index'] = node['loop_index'].to(train_device, non_blocking=True)
@@ -1932,7 +1954,7 @@ def get_func_repr_task(input_q, output_q):
         pickle.dump(local_list, f, protocol=pickle.HIGHEST_PROTOCOL)
     output_q.put((process_id, pkl_part_filename))
     
-def load_data_parallel(train_val_dataset_file, max_batch_size=2048, nb_processes=15, repr_pkl_output_folder=None, overwrite_existing_pkl=False, store_device="none", train_device="none" ):
+def load_data_parallel(train_val_dataset_file, max_batch_size=2048, model=None, nb_processes=15, repr_pkl_output_folder=None, overwrite_existing_pkl=False, store_device="none", train_device="none" ):
     torch.set_printoptions(threshold=10_000)
     if Path(repr_pkl_output_folder).is_dir() and overwrite_existing_pkl:
         shutil.rmtree(repr_pkl_output_folder)
@@ -1942,7 +1964,7 @@ def load_data_parallel(train_val_dataset_file, max_batch_size=2048, nb_processes
     print('Created folder ',repr_pkl_output_folder)
     
     print("loading batches from: "+train_val_dataset_file)
-    dataset = Dataset_parallel(train_val_dataset_file, max_batch_size, nb_processes=nb_processes, repr_pkl_output_folder=repr_pkl_output_folder, store_device=store_device, train_device=store_device)
+    dataset = Dataset_parallel(train_val_dataset_file, max_batch_size, model=model, nb_processes=nb_processes, repr_pkl_output_folder=repr_pkl_output_folder, store_device=store_device, train_device=store_device)
     indices = list(range(len(dataset)))
  
     batches_list=[]

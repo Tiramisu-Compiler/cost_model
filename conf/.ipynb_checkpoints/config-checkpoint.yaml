@@ -1,30 +1,33 @@
 experiment:
-    name: "data_scalability_20m"
+    name: "active_learning_new_data"
     base_path: "/data/kb4083/cost_model"
 
 # /data/kb4083/datasets/sample_20m_test.pkl
 # /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
 # /data/mm12191/datasets/benchmarks_mats1.pkl
+# "/data/kb4083/datasets/testing_bound_type_roots..json"
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/testing_bound_type_roots..json"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "dataset_scalability"
+    dataset_name:  "active_learning_new_data"
     batch_size: 1024
-    nb_processes: 170
+    nb_processes: 200
+
 
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
-    max_epochs: 2000
+    max_epochs: 500
     gpu: "cuda:4"
+    continue_training: False
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_data_scalability_20m_7cab.pt"
 
 testing:
     datasets: # choose from valid, bench.
-        # - valid
-        - bench
-    checkpoint: "best_model_ACTUAL_20m_2000_scalability_experiment.pt"
+        - valid
+    
 
 wandb:
     use_wandb: True

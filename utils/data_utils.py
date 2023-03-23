@@ -613,6 +613,7 @@ class Dataset_parallel:
                     dataset_str = f.read()
                     
                 self.programs_dict = json.loads(dataset_str)
+                
             elif dataset_filename.endswith("pkl"):
                 with open(dataset_filename, "rb") as f:
                     self.programs_dict = pickle.load(f)
@@ -623,7 +624,7 @@ class Dataset_parallel:
             print("number of functions per process: ",nb_funcs_per_process)
 
             for i in range(nb_processes):
-                process_programs_dict=dict(list(self.programs_dict.items())[i*nb_funcs_per_process:(i+1)*nb_funcs_per_process])
+                process_programs_dict = dict(list(self.programs_dict.items())[i*nb_funcs_per_process:(i+1)*nb_funcs_per_process])
                 input_queue.put((i, process_programs_dict, repr_pkl_output_folder, store_device))
 
             for i in range(nb_processes):
@@ -655,10 +656,10 @@ class Dataset_parallel:
 
             def can_set_default_eval(x, y):
                 return 0
-        
-        
+        # Free up memory from the unused dict
+        del self.programs_dict
         # Load the trained model
-        model = model.to(store_device)
+        
         nb_all = 0
         for function_name, nb_dropped, nb_pruned, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
@@ -691,7 +692,8 @@ class Dataset_parallel:
                     [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]]).float()
                 
         storing_device = torch.device(store_device)
-        
+        active_learning_device = storing_device
+        model = model.to(active_learning_device)
         # For each tree footprint in the dataset TODO explain what a tree footprint is
         for tree_footprint in tqdm(self.batches_dict):
             # shuffling the lists inside each footprint to avoid having batches with very low program diversity
@@ -718,12 +720,13 @@ class Dataset_parallel:
             for chunk in range( 0, len(self.batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
                 
                 # Check GPU memory in order to avoid Out of memory error
-                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.75):
+                if ( storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.8):
                     
                     print( "GPU memory on " + str(storing_device) + " nearly full, switching to CPU memory" )
                     self.gpu_fitted_batches_index = len(self.batched_X)
                     storing_device = torch.device("cpu")
-                
+                    active_learning_device = torch.device("cuda:0")
+                    model = model.to(active_learning_device)
 #                 self.batched_datapoint_attributes.append(
 #                     self.batches_dict[tree_footprint]["datapoint_attributes_list"][
 #                         chunk: chunk + max_batch_size
@@ -739,11 +742,11 @@ class Dataset_parallel:
                 )
                 inputs = (
                         self.batches_dict[tree_footprint]["tree"],
-                        first_part.to(storing_device).view(batch_size, num_comps, -1),
-                        vectors.to(storing_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
-                        third_part.to(storing_device).view(batch_size, num_comps, -1),
-                        torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device),
-                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][chunk : chunk + max_batch_size],0).to(storing_device),
+                        first_part.to(active_learning_device).view(batch_size, num_comps, -1),
+                        vectors.to(active_learning_device), # we send it with the shape (batch_size * num_comps, num vectors) to use it directly.
+                        third_part.to(active_learning_device).view(batch_size, num_comps, -1),
+                        torch.cat( self.batches_dict[tree_footprint]["loops_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(active_learning_device),
+                        torch.cat(self.batches_dict[tree_footprint]["comps_expr_tree_list"][chunk : chunk + max_batch_size],0).to(active_learning_device),
                     )
                 
                 self.batched_X.append(
@@ -765,7 +768,7 @@ class Dataset_parallel:
                 predictions = model(inputs) 
                 
                 # Calculate the error we want the model to predict
-                absolute_difference = tuple((abs(torch.FloatTensor(y).to(storing_device) - predictions)).tolist())
+                absolute_difference = tuple((abs(torch.FloatTensor(y).to(active_learning_device) - predictions)).tolist())
                 
                 self.batched_Y.append(
                     torch.FloatTensor(absolute_difference).to(storing_device)

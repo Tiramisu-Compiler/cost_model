@@ -5,14 +5,14 @@ experiment:
 # /data/kb4083/datasets/sample_20m_test.pkl
 # /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
 # /data/mm12191/datasets/benchmarks_mats1.pkl
-# "/data/kb4083/datasets/testing_bound_type.json"
+# "/data/kb4083/datasets/testing_bound_type_roots..json"
 data_generation:
     train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
+    valid_dataset_file: "/data/kb4083/datasets/testing_bound_type_roots..json"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "active_learning_new_data"
     batch_size: 1024
-    nb_processes: 128
+    nb_processes: 200
 
 
 

@@ -22,6 +22,7 @@ def mape_criterion(inputs, targets):
 def train_model(
     config,
     model,
+    original_model,
     criterion,
     optimizer,
     max_lr,
@@ -44,14 +45,48 @@ def train_model(
     for item in dataloader["val"]:
         label = item[1]
         dataloader_size["val"] += label.shape[0]
+        
     model = model.to(train_device)
-
+    original_model = original_model.to(train_device)
+    original_model.eval()
+    
     scheduler = OneCycleLR(
         optimizer,
         max_lr=max_lr,
         steps_per_epoch=len(dataloader["train"]),
         epochs=num_epochs,
     )
+    cpu_device = torch.device("cpu")
+    for phase in ["train", "val"]:
+        running_loss = 0.0
+        pbar = tqdm(dataloader[phase])
+        new_labels = []
+        for inputs, labels in pbar:
+            original_device = labels.device
+            inputs = (
+                inputs[0],
+                inputs[1].to(train_device),
+                inputs[2].to(train_device),
+                inputs[3].to(train_device),
+                inputs[4].to(train_device),
+                inputs[5].to(train_device),
+            )
+            with torch.set_grad_enabled(False):
+                original_model_predictions = original_model(inputs)
+                labels = labels.to(train_device)
+                labels = abs(labels - original_model_predictions)
+            
+            inputs = (
+                inputs[0],
+                inputs[1].to(cpu_device),
+                inputs[2].to(cpu_device),
+                inputs[3].to(cpu_device),
+                inputs[4].to(cpu_device),
+                inputs[5].to(cpu_device),
+            )
+            new_labels.append((inputs, labels.to(cpu_device)))
+        dataloader[phase] = new_labels
+        
     for epoch in range(num_epochs):
         epoch_start = time.time()
 
@@ -61,7 +96,8 @@ def train_model(
             else:
                 model.eval()
             running_loss = 0.0
-            pbar = tqdm(dataloader[phase])
+            pbar = tqdm(dataloader[phase]) 
+            
             for inputs, labels in pbar:
                 original_device = labels.device
                 inputs = (
@@ -72,6 +108,7 @@ def train_model(
                     inputs[4].to(train_device),
                     inputs[5].to(train_device),
                 )
+                    
                 labels = labels.to(train_device)
 
                 optimizer.zero_grad()

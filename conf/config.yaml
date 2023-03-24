@@ -1,5 +1,5 @@
 experiment:
-    name: "data_scalability_20m"
+    name: "active_learning"
     base_path: "/data/kb4083/cost_model"
 
 # /data/kb4083/datasets/sample_20m_test.pkl
@@ -7,12 +7,12 @@ experiment:
 # /data/mm12191/datasets/benchmarks_mats1.pkl
 # "/data/kb4083/datasets/testing_bound_type.json"
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/testing_bound_type_roots..json"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/testing_bound_type_roots..json"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "dataset_new_data"
     batch_size: 1024
-    nb_processes: 128
+    nb_processes: 1
 
 
 
@@ -20,9 +20,9 @@ training:
     log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 500
-    gpu: "cuda:1"
+    gpu: "cuda:4"
     continue_training: False
-    model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_code_model_555f.pt"
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_data_scalability_20m_7794.pt"
 
 testing:
     datasets: # choose from valid, bench.

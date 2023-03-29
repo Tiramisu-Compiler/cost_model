@@ -38,8 +38,11 @@ def main(config: RecursiveLSTMConfig):
         loops_tensor_size=8,
         train_device=config.training.gpu,
     )
+    train_device = torch.device(config.training.gpu)
+    
     if config.training.continue_training:
-        model.load_state_dict(torch.load(config.training.model_weights_path, map_location=config.training.gpu))
+        print(f"Continue training using model from {config.training.model_weights_path}")
+        model.load_state_dict(torch.load(config.training.model_weights_path, map_location=train_device))
         
     for param in model.parameters():
         param.requires_grad = True
@@ -49,9 +52,9 @@ def main(config: RecursiveLSTMConfig):
         "dataset_new/train",
         f"{config.data_generation.dataset_name}_1.pt",
     )
-    train_device = torch.device(config.training.gpu)
+    
     with open(path, "rb") as file:
-        train_bl_1 = torch.load(path, map_location=train_device)
+        train_data_1 = torch.load(path, map_location=train_device)
     path = os.path.join(
         config.experiment.base_path,
         "dataset_new/train",
@@ -59,9 +62,12 @@ def main(config: RecursiveLSTMConfig):
     )
     
     with open(path, "rb") as file:
-        train_bl_2 = torch.load(path, map_location='cpu')
-        
+        train_data_2 = torch.load(path, map_location='cpu')
+    
+    _ , train_bl_1, _ = train_data_1
+    _ , train_bl_2, _ = train_data_2
     print("loaded training")
+    
     path = os.path.join(
         config.experiment.base_path,
         "dataset_new/valid",
@@ -70,6 +76,7 @@ def main(config: RecursiveLSTMConfig):
     with open(path, "rb") as file:
         val_bl = torch.load(path, map_location='cpu')
         
+    _ , val_bl_2, _ = val_data_2
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(

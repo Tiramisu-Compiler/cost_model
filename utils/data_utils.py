@@ -428,10 +428,7 @@ def get_schedule_representation(
                 comp_schedule_dict["tiling"]["tiling_dims"]
             ):
                 loop_schedules_dict[tiled_loop]["tiled"] = 1
-#                 if(not ((loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
-#                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
-#                 ) ))):
-#                     print(f" program {function_name} json is: {program_json} \n schedule_json is {schedule_json} \n ")
+                
                 if (not (loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
                 ))):
@@ -442,8 +439,8 @@ def get_schedule_representation(
                 
         # Check whether unrolling was applied 
         if comp_schedule_dict["unrolling_factor"]:
-            comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
             
+            comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
             loop_schedules_dict[comp_innermost_loop]["unrolled"] = 1
                 
             assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or                                                                                           loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
@@ -580,7 +577,7 @@ class Dataset_parallel:
         # List of dropped functions 
         self.dropped_funcs = []
 #         # Saved data attributes for analysis and expirements TODO maybe remove this
-#         self.batched_datapoint_attributes = []
+        self.batched_datapoint_attributes = []
         # number of loaded datapoints
         self.nb_datapoints = 0
         self.gpu_fitted_batches_index = -1
@@ -656,7 +653,7 @@ class Dataset_parallel:
                 return 0
             
         nb_all = 0
-        for function_name, nb_dropped, nb_pruned, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
+        for function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
                 tree_indices_to_device(node, train_device=store_device)
             self.batches_dict[tree_footprint] = self.batches_dict.get(tree_footprint, {'tree': local_function_dict['tree'], 'comps_tensor_list': [], 'loops_tensor_list': [ ], 'datapoint_attributes_list': [], 'comps_expr_tree_list': [], 'speedups_list': [], 'exec_time_list': [], "func_id": []})
@@ -676,7 +673,7 @@ class Dataset_parallel:
             self.nb_datapoints += len(local_function_dict['speedups_list'])
             nb_all += nb_all_local
             
-        max_exprs = 51
+        max_exprs = 62
 
         for tree_footprint in tqdm(self.batches_dict):
             for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
@@ -719,11 +716,11 @@ class Dataset_parallel:
                     self.gpu_fitted_batches_index = len(self.batched_X)
                     storing_device = torch.device("cpu")
                 
-#                 self.batched_datapoint_attributes.append(
-#                     self.batches_dict[tree_footprint]["datapoint_attributes_list"][
-#                         chunk: chunk + max_batch_size
-#                     ]
-#                 )
+                self.batched_datapoint_attributes.append(
+                    self.batches_dict[tree_footprint]["datapoint_attributes_list"][
+                        chunk: chunk + max_batch_size
+                    ]
+                )
                 # Here we separate the comps tensor to get the transformation vectors
                 x = torch.cat( self.batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0).to(storing_device)
         
@@ -756,14 +753,14 @@ class Dataset_parallel:
             zip(
                 self.batched_X,
                 self.batched_Y,
-#                 self.batched_datapoint_attributes,
+                self.batched_datapoint_attributes,
             )
         )
         random.shuffle(zipped)
         (
             self.batched_X,
             self.batched_Y,
-#             self.batched_datapoint_attributes,
+            self.batched_datapoint_attributes,
         ) = zip(*zipped)
 
         print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}" )
@@ -978,7 +975,14 @@ def get_results_df(
 
     for k, (inputs, labels) in tqdm(list(enumerate(batches_list))):
         original_device = labels.device
-        inputs = (inputs[0], inputs[1].to(train_device), inputs[2].to(train_device))
+        inputs = (
+                    inputs[0],
+                    inputs[1].to(train_device),
+                    inputs[2].to(train_device),
+                    inputs[3].to(train_device),
+                    inputs[4].to(train_device),
+                    inputs[5].to(train_device),
+                )
         labels = labels.to(train_device)
         outputs = model(inputs)
         assert outputs.shape == labels.shape
@@ -995,10 +999,13 @@ def get_results_df(
         node_names.extend(zipped_attributes[5])
         tree_footprints.extend(zipped_attributes[6])
         inputs = (
-            inputs[0],
-            inputs[1].to(original_device),
-            inputs[2].to(original_device),
-        )
+                    inputs[0],
+                    inputs[1].to(original_device),
+                    inputs[2].to(original_device),
+                    inputs[3].to(original_device),
+                    inputs[4].to(original_device),
+                    inputs[5].to(original_device),
+                )
         labels = labels.to(original_device)
     preds = torch.cat(all_outputs)
     targets = torch.cat(all_labels)
@@ -1467,31 +1474,30 @@ def format_bound(iterator_name, bound, iterators_list, is_lower):
 
 def get_trasnformation_matrix_from_vector(transformation, matrix_size):
     matrix = np.identity(matrix_size)
-    
+    assert(len(transformation) == MAX_TAGS)
     if (transformation[0] == 1):
         assert(transformation[1] < matrix_size and transformation[2] < matrix_size)
         matrix[transformation[1], transformation[2]] = 1
         matrix[transformation[1], transformation[1]] = 0
         matrix[transformation[2], transformation[1]] = 1
         matrix[transformation[2], transformation[2]] = 0
-        
+
     elif (transformation[0] == 2):
         assert(transformation[3] < matrix_size)
         matrix[transformation[3], transformation[3]] = -1
-        
+
     elif transformation[0] == 3:
         # 2D Skewing
         if transformation[6] == 0:
+            
             assert(transformation[4] < matrix_size and transformation[5] < matrix_size)
             matrix[transformation[4], transformation[4]] = transformation[7]
             matrix[transformation[4], transformation[5]] = transformation[8]
             matrix[transformation[5], transformation[4]] = transformation[9]
             matrix[transformation[5], transformation[5]] = transformation[10]
         if transformation[6] > 0:
-#             assert(transformation[4] < matrix_size and transformation[5] < matrix_size and transformation[6] < matrix_size)
-    
-            if not (transformation[4] < matrix_size and transformation[5] < matrix_size and transformation[6] < matrix_size):
-                raise RandomMatrix
+            
+            assert(transformation[4] < matrix_size and transformation[5] < matrix_size and transformation[6] < matrix_size)
             matrix[transformation[4], transformation[4]] = transformation[7]
             matrix[transformation[4], transformation[5]] = transformation[8]
             matrix[transformation[4], transformation[6]] = transformation[9]
@@ -1501,7 +1507,7 @@ def get_trasnformation_matrix_from_vector(transformation, matrix_size):
             matrix[transformation[6], transformation[4]] = transformation[13]
             matrix[transformation[6], transformation[5]] = transformation[14]
             matrix[transformation[6], transformation[6]] = transformation[15]
-            
+        
     return matrix
 # transform the vectors into a series of matrices
 def get_transformation_matrix(

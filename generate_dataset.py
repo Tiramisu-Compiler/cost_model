@@ -31,7 +31,7 @@ def generate_datasets(conf):
         ),
         "wb",
     ) as valid_bl_pickle_file:
-        torch.save(val_bl, valid_bl_pickle_file)
+        torch.save([val_ds, val_bl, val_indices], valid_bl_pickle_file)
     
 #     Training
     train_ds, train_bl, train_indices, gpu_fitted_batches_index = load_data_parallel(conf.data_generation.train_dataset_file,max_batch_size = 1024,
@@ -40,7 +40,11 @@ def generate_datasets(conf):
     training_dataset_path = os.path.join(conf.experiment.base_path, "dataset_new/train")
     
     train_bl_1 = train_bl[:gpu_fitted_batches_index]
+    train_ds_1 = train_ds[:gpu_fitted_batches_index]
+    train_indices_1 = train_indices[:gpu_fitted_batches_index]
     train_bl_2 = train_bl[gpu_fitted_batches_index:]
+    train_ds_2 = train_ds[gpu_fitted_batches_index:]
+    train_indices_2 = train_indices[gpu_fitted_batches_index:]
     
     if not os.path.exists(training_dataset_path):
         os.makedirs(training_dataset_path)
@@ -52,7 +56,7 @@ def generate_datasets(conf):
         ),
         "wb",
     ) as train_bl_pickle_file:
-        torch.save(train_bl_1, train_bl_pickle_file)
+        torch.save([train_ds_1, train_bl_1, train_indices_1], train_bl_pickle_file)
     with open(
         os.path.join(
             conf.experiment.base_path,
@@ -61,7 +65,7 @@ def generate_datasets(conf):
         ),
         "wb",
     ) as train_bl_pickle_file:
-        torch.save(train_bl_2, train_bl_pickle_file)
+        torch.save([train_ds_2, train_bl_2, train_indices_2], train_bl_pickle_file)
 
 
 if __name__ == "__main__":

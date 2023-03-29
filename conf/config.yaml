@@ -1,5 +1,5 @@
 experiment:
-    name: "data_scalability_20m"
+    name: "release_model_finetuning"
     base_path: "/data/kb4083/cost_model"
 
 # /data/kb4083/datasets/sample_20m_test.pkl
@@ -7,27 +7,28 @@ experiment:
 # /data/mm12191/datasets/benchmarks_mats1.pkl
 # "/data/kb4083/datasets/testing_bound_type.json"
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-124468_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-124468_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "dataset_new_data"
+    dataset_name:  "dataset_newest_fused_testing_eval"
     batch_size: 1024
-    nb_processes: 128
+    nb_processes: 200
 
 
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
-    max_epochs: 500
-    gpu: "cuda:1"
-    continue_training: False
-    model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_code_model_555f.pt"
+    max_epochs: 1000
+    gpu: "cpu"
+    continue_training: True
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_model_8465.pt"
 
 testing:
     datasets: # choose from valid, bench.
         - valid
-    
+    testing_model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_model_finetuning_c773.pt"
+    gpu: "cuda:7"
 
 wandb:
     use_wandb: True

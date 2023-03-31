@@ -9,9 +9,6 @@ from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
 
-train_device = torch.device("cuda")
-store_device = torch.device("cuda")
-
 def define_and_load_model(config):
     model = Model_Recursive_LSTM_v2(
         input_size=config.model.input_size,

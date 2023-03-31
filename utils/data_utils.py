@@ -16,6 +16,7 @@ from utils.config import *
 from scipy.stats import spearmanr
 from sklearn.metrics import ndcg_score
 import enum
+import os, psutil
 # An exception to limit the maximum number of allowed transformations 
 class NbTranformationException(Exception):
     pass
@@ -40,14 +41,19 @@ MAX_NUM_TRANSFORMATIONS = 4
 # Maximum size of the tags vector representing each transformation
 MAX_TAGS = 16
 
+# Maximum depth of a loop nest for each computation
+MAX_DEPTH = 5
+
+# Maximum length of expressions in the dataset
+MAX_EXPR_LEN = 62
+
 # Enumeration for the different exploration algorithms used to generate the data
 # class Exploration_method(int, enum.Enum):
 #    Beam_search = 0
 #    Recursive_beam_search = 1
 #    Reinforcement_learning = 2
-
 # Creates a template for the input representation
-def get_representation_template(program_dict, max_depth, train_device="cpu"):
+def get_representation_template(program_dict, train_device="cpu"):
     # Set the max and min number of accesses allowed 
     max_accesses = 15
     min_accesses = 0
@@ -79,7 +85,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         if len(comp_dict["accesses"]) < min_accesses:
             raise NbAccessException
         
-        if len(comp_dict["iterators"]) > max_depth:
+        if len(comp_dict["iterators"]) > MAX_DEPTH:
             raise LoopsDepthException
 
         comp_repr_template = []
@@ -112,7 +118,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         
         # Add padding incase the number of loops is lower than the max
         iterators_repr.extend(
-            [0] * iterator_repr_size * (max_depth - len(comp_dict["iterators"]))
+            [0] * iterator_repr_size * (MAX_DEPTH - len(comp_dict["iterators"]))
         )
         
         # Add two tags for whether unrolling was applied and the unrolling factor
@@ -126,17 +132,17 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         # Adding initial constraint matrix
         # Remove the 1 mask from constraint matrix. Not necessary.
         iterators_repr.append(c_code+'-OgConstraintMatrixStart')
-        iterators_repr.extend(['OgC']*((max_depth*max_depth*2)-2))
+        iterators_repr.extend(['OgC']*((MAX_DEPTH*MAX_DEPTH*2)-2))
         iterators_repr.append(c_code+'-OgConstraintMatrixEnd')
         
         # Adding initial constraint vector
         iterators_repr.append(c_code+'-OgConstraintVectorStart')
-        iterators_repr.extend(['V']*(max_depth*2-2))
+        iterators_repr.extend(['V']*(MAX_DEPTH*2-2))
         iterators_repr.append(c_code+'-OgConstraintVectorEnd')
         
         # Adding transformed constraint matrix
         iterators_repr.append(c_code+'-ConstraintMatrixStart')
-        iterators_repr.extend(['C']*((max_depth*max_depth*2)-2))
+        iterators_repr.extend(['C']*((MAX_DEPTH*MAX_DEPTH*2)-2))
         iterators_repr.append(c_code+'-ConstraintMatrixEnd')
                               
         # Add the loop representation to the computation vector 
@@ -144,7 +150,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         
         # Pad the write access matrix and add it to the representation
         padded_write_matrix = pad_access_matrix(
-            isl_to_write_matrix(comp_dict["write_access_relation"]), max_depth
+            isl_to_write_matrix(comp_dict["write_access_relation"])
         )
         write_access_repr = [
             comp_dict["write_buffer_id"] + 1
@@ -156,7 +162,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
         read_accesses_repr = []
         for read_access_dict in comp_dict["accesses"]:
             read_access_matrix = pad_access_matrix(
-                read_access_dict["access_matrix"], max_depth
+                read_access_dict["access_matrix"]
             )
             read_access_repr = (
                 [+read_access_dict["access_is_reduction"]]
@@ -166,7 +172,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
             read_accesses_repr.extend(read_access_repr)
 
         
-        access_repr_len = (max_depth + 1) * (max_depth + 2) + 1 + 1
+        access_repr_len = (MAX_DEPTH + 1) * (MAX_DEPTH + 2) + 1 + 1
         
         read_accesses_repr.extend(
             [0] * access_repr_len * (max_accesses - len(comp_dict["accesses"]))
@@ -223,7 +229,7 @@ def get_representation_template(program_dict, max_depth, train_device="cpu"):
     tree_annotation = copy.deepcopy(orig_tree_structure)
     
     
-    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device=train_device)
+    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device="cpu")
     
     return (
         prog_tree,
@@ -267,9 +273,7 @@ def get_schedule_representation(
     comps_repr_templates_list,
     loops_repr_templates_list,
     comps_placeholders_indices_dict,
-    loops_placeholders_indices_dict,
-    function_name,
-    max_depth,   
+    loops_placeholders_indices_dict,   
 ):
     
     # Create a copy of the templates to avoid modifying the values for other schedules
@@ -363,7 +367,7 @@ def get_schedule_representation(
         
         # Check which transformations (interchange, reversal and skweing) were applied and add the padded vector representation to their corresponding position
         padded_tags = get_padded_transformation_tags(
-            program_json, schedule_json, comp_name, max_depth
+            program_json, schedule_json, comp_name
         )
         
         tags_start = comps_placeholders_indices_dict[ c_code + "-TransformationTagsStart" ]
@@ -382,9 +386,9 @@ def get_schedule_representation(
         
         nb_mat_elements = ogc_end[1] - ogc_start[1] + 1
         
-        assert(max_depth*max_depth*2 == nb_mat_elements)
+        assert(MAX_DEPTH*MAX_DEPTH*2 == nb_mat_elements)
         
-        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth).flatten().tolist()
+        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name).flatten().tolist()
                               
         ogv_start = comps_placeholders_indices_dict[c_code+'-OgConstraintVectorStart']
         
@@ -392,7 +396,7 @@ def get_schedule_representation(
         
         nb_mat_elements = ogv_end[1] - ogv_start[1] + 1
         
-        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name, max_depth)
+        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name)
         
         c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
         
@@ -400,9 +404,9 @@ def get_schedule_representation(
         
         nb_mat_elements = c_end[1] - c_start[1] + 1
 
-        assert(max_depth*max_depth*2 == nb_mat_elements)
+        assert(MAX_DEPTH*MAX_DEPTH*2 == nb_mat_elements)
         
-        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth).flatten().tolist()
+        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name).flatten().tolist()
         
 
     # Fill the loop representation
@@ -421,6 +425,15 @@ def get_schedule_representation(
 
     for comp_index, comp_name in enumerate(ordered_comp_list):
         comp_schedule_dict = schedule_json[comp_name]
+        # If this computation was moved to a different loop nest through the application of fusion,
+        # we know that it will use the same iterators as the computations it was moved to.
+        # The two computations thus share the same schedule (Since we only apply loop transformations and they share the same loops)
+        if ("fusions" in schedule_json and schedule_json["fusions"]):
+            for fusion in schedule_json["fusions"]:
+                if comp_name in fusion:
+                    iterator_comp_name = fusion[0]
+                    transf_loop_nest = program_json["computations"][iterator_comp_name]["iterators"].copy()
+                    comp_schedule_dict = schedule_json[iterator_comp_name]
         
         # Check whether tiling was applied 
         if comp_schedule_dict["tiling"]:
@@ -564,8 +577,6 @@ class Dataset_parallel:
         self.batched_Y = []
         # Structure to contain TODO
         self.batches_dict = dict()
-        # Maximum number of nested loops in a program
-        self.max_depth = 5
         # Number of all the dropped schedules
         self.nb_dropped = 0
         self.nb_dropped_random_matrix = 0
@@ -581,7 +592,6 @@ class Dataset_parallel:
         # number of loaded datapoints
         self.nb_datapoints = 0
         self.gpu_fitted_batches_index = -1
-        
         processes_output_list = []
         if just_load_pickled_repr: #just load the existing repr
             
@@ -609,9 +619,12 @@ class Dataset_parallel:
                     dataset_str = f.read()
                     
                 self.programs_dict = json.loads(dataset_str)
+                del dataset_str
+                gc.collect()
             elif dataset_filename.endswith("pkl"):
                 with open(dataset_filename, "rb") as f:
                     self.programs_dict = pickle.load(f)
+                    
             functions_list = list(self.programs_dict.keys())
             random.Random(42).shuffle(functions_list)
 
@@ -651,9 +664,8 @@ class Dataset_parallel:
 
             def can_set_default_eval(x, y):
                 return 0
-            
-        nb_all = 0
-        for function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned, nb_datapoints, tree_footprint, local_function_dict, nb_all_local in processes_output_list:
+        print(f"Loading functions from each process")
+        for function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned, nb_datapoints, tree_footprint, local_function_dict in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
                 tree_indices_to_device(node, train_device=store_device)
             self.batches_dict[tree_footprint] = self.batches_dict.get(tree_footprint, {'tree': local_function_dict['tree'], 'comps_tensor_list': [], 'loops_tensor_list': [ ], 'datapoint_attributes_list': [], 'comps_expr_tree_list': [], 'speedups_list': [], 'exec_time_list': [], "func_id": []})
@@ -671,18 +683,13 @@ class Dataset_parallel:
     
             self.nb_pruned += nb_pruned
             self.nb_datapoints += len(local_function_dict['speedups_list'])
-            nb_all += nb_all_local
             
-        max_exprs = 62
-
-        for tree_footprint in tqdm(self.batches_dict):
-            for i in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"])):
-                for j in range(len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i])):
-                    self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j].extend(
-                        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] * (max_exprs - len(self.batches_dict[tree_footprint]["comps_expr_tree_list"][i][j])))
-                self.batches_dict[tree_footprint]["comps_expr_tree_list"][i] = torch.tensor(
-                    [self.batches_dict[tree_footprint]["comps_expr_tree_list"][i]]).float()
-                
+        print(f"memory usage before deleting programs_dict is: {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2}")
+        del self.programs_dict
+        gc.collect()
+        print(f"memory usage after deleting programs_dict is: {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2}")
+        
+        
         storing_device = torch.device(store_device)
         
         # For each tree footprint in the dataset TODO explain what a tree footprint is
@@ -764,7 +771,12 @@ class Dataset_parallel:
         ) = zip(*zipped)
 
         print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}" )
-        print( f"Number of dropped {self.nb_dropped}, Number of dropped points from RandomMatrix exception {self.nb_dropped_random_matrix}, Number of dropped points from ContradictingTilingParameters exception {self.nb_dropped_contradicting_tiling_params}, Number of dropped points from LinAlgError exception {self.nb_dropped_transformation_list_issue}, all the points before processing {nb_all}" )
+        print( f"Number of dropped points: {self.nb_dropped}"
+                f"\nNumber of dropped points from RandomMatrix exception: {self.nb_dropped_random_matrix}"
+                f"\nNumber of dropped points from ContradictingTilingParameters exception: {self.nb_dropped_contradicting_tiling_params}"
+                f"\nNumber of dropped points from LinAlgError exception: {self.nb_dropped_transformation_list_issue}"
+                f"\nNumber of dropped points from pruning: {self.nb_pruned}"
+                )
 
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -874,7 +886,7 @@ def load_data(
 #         - 3 for loop skewing
         
 def get_padded_transformation_tags(
-    program_json, schedule_json, comp_name, max_depth=None
+    program_json, schedule_json, comp_name
 ):
     # Extract information about the computation and the transformations that were applied from the json input
     comp_dict = program_json["computations"][comp_name]
@@ -919,11 +931,11 @@ def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footp
         speedup,
     )
 
-def pad_access_matrix(access_matrix, max_depth):
+def pad_access_matrix(access_matrix):
     access_matrix = np.array(access_matrix)
     access_matrix = np.c_[np.ones(access_matrix.shape[0]), access_matrix]
     access_matrix = np.r_[[np.ones(access_matrix.shape[1])], access_matrix]
-    padded_access_matrix = np.zeros((max_depth + 1, max_depth + 2))
+    padded_access_matrix = np.zeros((MAX_DEPTH + 1, MAX_DEPTH + 2))
     padded_access_matrix[
         : access_matrix.shape[0], : access_matrix.shape[1] - 1
     ] = access_matrix[:, :-1]
@@ -1288,13 +1300,10 @@ def speedup_clip(speedup):
 
 #TODO
 def drop_program(prog_dict, prog_name):
-#     print(prog_name[8:])
     if len(prog_dict["schedules_list"]) < 2:
+#         print(f'dropping {prog_name} becuase one schedule: {len(prog_dict["schedules_list"])}')
         return True
-    if ( 750000 <= int(prog_name[8:]) and int(prog_name[8:])<=752600 ):
     
-#         print("Found an random matrix program", prog_name)
-        return True
     if has_skippable_loop_1comp(prog_dict):
         return True
     if (
@@ -1383,7 +1392,7 @@ def get_tree_expr_repr(node, comp_type):
 
         return expr_tensor
     
-def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, max_depth):
+def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name):
     
     iterators_list = program_json["computations"][comp_name]["iterators"]
     result = []
@@ -1397,8 +1406,8 @@ def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name, 
     result = np.pad(
         result,
         [
-            (0, (max_depth)*2 - result.shape[0]),
-            (0, max_depth - result.shape[1]),
+            (0, (MAX_DEPTH)*2 - result.shape[0]),
+            (0, MAX_DEPTH - result.shape[1]),
         ],
         mode="constant",
         constant_values=0,
@@ -1413,7 +1422,7 @@ def is_int(s):
 
 # returns a vector that represents the right hand sise of teh constraint matrix inequalities
 # returns b where: Ax <= b and A being the constarint matrix
-def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name, max_depth):
+def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name):
     iterators_list = program_json["computations"][comp_name]["iterators"]
     result = []
     for it in iterators_list:
@@ -1425,12 +1434,12 @@ def get_padded_second_side_of_the_constraint_equations_original(program_json, sc
             result.append(int(program_json["iterators"][it]["upper_bound"]))
         else:
             result.append(0)
-    result = result + [0]*(max_depth*2-len(result))
+    result = result + [0]*(MAX_DEPTH*2-len(result))
     return result
                               
-def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name, max_depth):
+def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name):
     iterators_list = program_json["computations"][comp_name]["iterators"]
-    transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name, max_depth)
+    transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name)
     result = []
     for i in iterators_list:
         for j in range(2):
@@ -1446,8 +1455,8 @@ def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_na
     result = np.pad(
         result,
         [
-            (0, (max_depth)*2 - result.shape[0]),
-            (0, max_depth - result.shape[1]),
+            (0, (MAX_DEPTH)*2 - result.shape[0]),
+            (0, MAX_DEPTH - result.shape[1]),
         ],
         mode="constant",
         constant_values=0,
@@ -1511,7 +1520,7 @@ def get_trasnformation_matrix_from_vector(transformation, matrix_size):
     return matrix
 # transform the vectors into a series of matrices
 def get_transformation_matrix(
-    program_json, schedule_json, comp_name, max_depth=None
+    program_json, schedule_json, comp_name
 ):
     nb_iterators = len(program_json["computations"][comp_name]["iterators"])
     final_transformation = np.identity(nb_iterators)
@@ -1793,28 +1802,19 @@ def get_func_repr_task(input_q, output_q):
     #     print('waiting for task')
     process_id, programs_dict, repr_pkl_output_folder, train_device = input_q.get()
     function_name_list = list(programs_dict.keys())
-    nb_dropped = 0
-    nb_dropped_random_matrix = 0
-    nb_dropped_contradicting_tiling_params = 0
-    nb_dropped_transformation_list_issue = 0
-    nb_pruned = 0
-    nb_datapoints = 0
-    nb_all=0
-    cpt = 0
     dropped_funcs = []
     local_list = []
+    nb_dropped_loops_depth = 0
+    nb_dropped_accesses_len = 0
     for function_name in tqdm(function_name_list):
         nb_dropped = 0
+        nb_dropped_random_matrix = 0
+        nb_dropped_contradicting_tiling_params = 0
+        nb_dropped_transformation_list_issue = 0
         nb_pruned = 0
-        nb_all=0
-        nb_all += len(
-                programs_dict[function_name]["schedules_list"]
-            )
+        nb_datapoints = 0
         # Check whether this function should be dropped
         if drop_program(programs_dict[function_name], function_name):
-            nb_dropped += len(
-                programs_dict[function_name]["schedules_list"]
-            )
             dropped_funcs.append(function_name)
             continue
             
@@ -1831,17 +1831,22 @@ def get_func_repr_task(input_q, output_q):
                 comps_expr_repr_templates_list
             ) = get_representation_template(
                 programs_dict[function_name],
-                max_depth=5,
                 train_device=train_device,
             )
         
-        except (NbAccessException, LoopsDepthException):
+        except LoopsDepthException:
             # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
-            nb_dropped += len(
+            nb_dropped_loops_depth =+ len(
                 programs_dict[function_name]["schedules_list"]
             )
             continue
-        
+        except NbAccessException:
+            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
+#             print(f"removing because of exceptions {function_name}")
+            nb_dropped_accesses_len =+ len(
+                programs_dict[function_name]["schedules_list"]
+            )
+            continue
         # Get the initial execution time for the program to calculate the speedups (initial exec time / transformed exec time)
         program_exec_time = programs_dict[function_name][
             "initial_execution_time"
@@ -1895,13 +1900,11 @@ def get_func_repr_task(input_q, output_q):
                     loops_repr_templates_list,
                     comps_placeholders_indices_dict,
                     loops_placeholders_indices_dict,
-                    function_name,
-                    max_depth=5,
                 )
             except NbTranformationException:
-                    # If the number of transformations exceeded the specified max, we skip this schedule
-                    nb_dropped += 1 
-                    continue
+                # If the number of transformations exceeded the specified max, we skip this schedule
+                nb_dropped += 1 
+                continue
             except RandomMatrix :
                 nb_dropped += 1
                 nb_dropped_random_matrix += 1
@@ -1918,6 +1921,9 @@ def get_func_repr_task(input_q, output_q):
             # Get information about this datapoint (memory use, execution time...)
             datapoint_attributes = get_datapoint_attributes(
                 function_name, programs_dict[function_name], schedule_index, tree_footprint)
+            # Padd the expression representtaion
+            for j in range(len(comps_expr_repr_templates_list)):
+                comps_expr_repr_templates_list[j].extend([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] * (MAX_EXPR_LEN - len(comps_expr_repr_templates_list[j])))
                 
             # Add each part of the input to the local_function_dict to be sent to the parent process
             local_function_dict['comps_tensor_list'].append(comps_tensor)
@@ -1930,9 +1936,17 @@ def get_func_repr_task(input_q, output_q):
             local_function_dict['speedups_list'].append(sched_speedup)
             nb_datapoints += 1
         
-        local_list.append((function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned,
-                           nb_datapoints, tree_footprint, local_function_dict,nb_all))
-    
+        local_function_dict["comps_expr_tree_list"] = torch.tensor(local_function_dict["comps_expr_tree_list"]).float()
+        local_list.append((
+            function_name, 
+            nb_dropped, 
+            nb_dropped_random_matrix, 
+            nb_dropped_contradicting_tiling_params, 
+            nb_dropped_transformation_list_issue, 
+            nb_pruned, 
+            nb_datapoints, 
+            tree_footprint, 
+            local_function_dict))
     pkl_part_filename = repr_pkl_output_folder + '/pickled_representation_part_'+str(process_id)+'.pkl'
     with open(pkl_part_filename, 'wb') as f:
         pickle.dump(local_list, f, protocol=pickle.HIGHEST_PROTOCOL)

@@ -90,7 +90,6 @@ def train_model(
                 running_loss += loss.item() * labels.shape[0]
                 labels = labels.to(original_device)
                 epoch_end = time.time()
-            print(phase)
             epoch_loss = running_loss / dataloader_size[phase]
 
             if phase == "val":

@@ -46,7 +46,7 @@ def main(config: RecursiveLSTMConfig):
         
     for param in model.parameters():
         param.requires_grad = True
-    
+    print(f"Loading the first part of the training set into GPU: {train_device}")
     path = os.path.join(
         config.experiment.base_path,
         "dataset_new/train",
@@ -55,6 +55,8 @@ def main(config: RecursiveLSTMConfig):
     
     with open(path, "rb") as file:
         train_data_1 = torch.load(path, map_location=train_device)
+    print(f"Done loading.")
+    print(f"Loading the second part of the training set into CPU")
     path = os.path.join(
         config.experiment.base_path,
         "dataset_new/train",
@@ -63,20 +65,21 @@ def main(config: RecursiveLSTMConfig):
     
     with open(path, "rb") as file:
         train_data_2 = torch.load(path, map_location='cpu')
-    
+    print(f"Done loading.")
     _ , train_bl_1, _ = train_data_1
     _ , train_bl_2, _ = train_data_2
-    print("loaded training")
     
+    print(f"Loading the validation set into CPU")
     path = os.path.join(
         config.experiment.base_path,
         "dataset_new/valid",
         f"{config.data_generation.dataset_name}.pt",
     )
     with open(path, "rb") as file:
-        val_bl = torch.load(path, map_location='cpu')
-        
-    _ , val_bl_2, _ = val_data_2
+        val_data = torch.load(path, map_location='cpu')
+    
+    print(f"Done loading.")
+    _ , val_bl, _ = val_data
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(

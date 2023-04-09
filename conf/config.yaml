@@ -1,18 +1,18 @@
 experiment:
-    name: "release_model_finetuning"
+    name: "fusion_of_all_data_nopre"
     base_path: "/data/kb4083/cost_model"
 
-# /data/kb4083/datasets/sample_20m_test.pkl
-# /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
+# /data/kb4083/datasets/fusion_of_all_data/dataset_expr_batch101-838143_train.pkl
+# /data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_debug.pkl
 # /data/mm12191/datasets/benchmarks_mats1.pkl
-# "/data/kb4083/datasets/testing_bound_type.json"
+# /data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-152504_train.pkl
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-124468_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-124468_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-152504_debug.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-152504_debug.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "dataset_newest_fused_testing_eval"
+    dataset_name:  "fusion_of_all_data"
     batch_size: 1024
-    nb_processes: 200
+    nb_processes: 10
 
 
 
@@ -20,18 +20,18 @@ training:
     log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 1000
-    gpu: "cpu"
-    continue_training: True
-    model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_model_8465.pt"
+    gpu: "cuda:7"
+    continue_training: False
+    model_weights_path: "/data/kb4083/cost_model/best_model_release_model_8465.pt"
 
 testing:
     datasets: # choose from valid, bench.
         - valid
     testing_model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_model_finetuning_c773.pt"
-    gpu: "cuda:7"
+    gpu: "cuda:6"
 
 wandb:
-    use_wandb: True
+    use_wandb: False
     project: "release_model"
     
 model: 

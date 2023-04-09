@@ -53,6 +53,7 @@ def train_model(
         epochs=num_epochs,
     )
     for epoch in range(num_epochs):
+        
         epoch_start = time.time()
 
         for phase in ["train", "val"]:
@@ -78,7 +79,6 @@ def train_model(
 
                 with torch.set_grad_enabled(phase == "train"):
                     outputs = model(inputs)
-                    # print(outputs.get_device(),labels.get_device())
                     assert outputs.shape == labels.shape
                     loss = criterion(outputs, labels)
 

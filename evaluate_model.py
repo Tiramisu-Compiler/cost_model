@@ -9,33 +9,44 @@ from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
 
-def define_and_load_model(config):
+def define_and_load_model(conf):
+    # Define the model
     model = Model_Recursive_LSTM_v2(
-        input_size=config.model.input_size,
-        comp_embed_layer_sizes=list(config.model.comp_embed_layer_sizes),
-        drops=list(config.model.drops),
+        input_size=conf.model.input_size,
+        comp_embed_layer_sizes=list(conf.model.comp_embed_layer_sizes),
+        drops=list(conf.model.drops),
         loops_tensor_size=8,
-        train_device=config.testing.gpu,
+        train_device=conf.testing.gpu,
     )
+    # Load the trained model weights
     model.load_state_dict(
         torch.load(
-            config.testing.testing_model_weights_path,
-            map_location=config.testing.gpu,
+            conf.testing.testing_model_weights_path,
+            map_location=conf.testing.gpu,
         )
     )
-    model = model.to(config.testing.gpu)
+    model = model.to(conf.testing.gpu)
+    
+    # Set the model to evaluation mode
     model.eval()
+    
     return model
 
 
-def evaluate(model, dataset_path, train_device):
+def evaluate(conf, model):
+    
     print("Loading the dataset...")
-    with open(dataset_path, "rb") as file:
-        validation_data = torch.load(dataset_path, map_location='cpu')
-    val_ds, val_bl, val_indices = validation_data
+    val_ds, val_bl, val_indices = load_pickled_repr(
+        os.path.join(conf.experiment.base_path ,'pickled/pickled_')+Path(conf.data_generation.valid_dataset_file), 
+        max_batch_size = 1024, 
+        store_device=conf.testing.gpu, 
+        train_device=conf.testing.gpu
+    )
+    
     print("Evaluation...")
-    val_df = get_results_df(val_ds, val_bl, val_indices, model, train_device = train_device)
+    val_df = get_results_df(val_ds, val_bl, val_indices, model, train_device = conf.testing.gpu)
     val_scores = get_scores(val_df)
+    
     return dict(
         zip(
             ["nDCG", "nDCG@5", "nDCG@1", "Spearman_ranking_correlation", "MAPE"],
@@ -48,13 +59,10 @@ def evaluate(model, dataset_path, train_device):
 def main(conf):
     print("Defining and loading the model using parameters from the config file")
     model = define_and_load_model(conf)
-    path = os.path.join(
-        conf.experiment.base_path,
-        "dataset_new/valid",
-        f"{conf.data_generation.dataset_name}.pt",
-    )
-    print(f"Validating on the dataset: {path}")
-    scores = evaluate(model, path, conf.testing.gpu)
+    
+    print(f"Validating on the dataset: {conf.data_generation.valid_dataset_file}")
+    scores = evaluate(conf, model)
+    
     print(f"Evaluation scores are:\n{scores}")
 
 

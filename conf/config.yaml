@@ -1,47 +1,40 @@
-experiment:
-    name: "fusion_of_all_data_nopre"
-    base_path: "/data/kb4083/cost_model"
+experiment: # Name of the expirement 
+    name: "experiment_name" # This will be used to save the best model weights
+    base_path: "/absolute/path/to/the/model/code" 
 
-# /data/kb4083/datasets/fusion_of_all_data/dataset_expr_batch101-838143_train.pkl
-# /data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_debug.pkl
-# /data/mm12191/datasets/benchmarks_mats1.pkl
-# /data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-152504_train.pkl
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-152504_debug.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/fusion_of_fixed_nr_data/dataset_expr_batch101-152504_debug.pkl"
-    benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "fusion_of_all_data"
-    batch_size: 1024
-    nb_processes: 10
+    train_dataset_file: "/path/to/the/training/dataset"  # training / validation set
+    valid_dataset_file: "/path/to/the/validation/dataset"
+    benchmark_dataset_file: "/path/to/the/benchmarks/dataset"
+    batch_size: 2048
+    nb_processes: 4 # Number of processes to use when loading the data in parallel
 
 
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
-    max_epochs: 1000
-    gpu: "cuda:7"
-    continue_training: False
-    model_weights_path: "/data/kb4083/cost_model/best_model_release_model_8465.pt"
+    max_epochs: 1000 
+    gpu: "cuda:x" # GPU to train on. Example: cuda:2
+    continue_training: False # Continue training from saved model checkpoint
+    model_weights_path: "/path/to/model/weights" # Model weights to use for finetuning
 
 testing:
-    datasets: # choose from valid, bench.
-        - valid
-    testing_model_weights_path: "/data/kb4083/cost_model/weights/best_model_release_model_finetuning_c773.pt"
-    gpu: "cuda:6"
+    testing_model_weights_path: "/path/to/model/weights" # Model weights to evaluate
+    gpu: "cuda:x" # GPU to validate on
 
-wandb:
-    use_wandb: False
-    project: "release_model"
+wandb: 
+    use_wandb: False # Track model progress using the Weights & Biases platform
+    project: "release_model" # Name of the project to add this expirement to
     
 model: 
-    input_size: 846
-    comp_embed_layer_sizes:
+    input_size: 846 # Size of the input. Here we specify the size of the computation vector.
+    comp_embed_layer_sizes: 
         - 600
         - 350
         - 200
         - 180
-    drops:
+    drops: # Dropout layers probabilities
         - 0.050
         - 0.050
         - 0.050

@@ -29,7 +29,6 @@ def define_and_load_model(conf):
     
     # Set the model to evaluation mode
     model.eval()
-    
     return model
 
 
@@ -42,11 +41,9 @@ def evaluate(conf, model):
         store_device=conf.testing.gpu, 
         train_device=conf.testing.gpu
     )
-    
     print("Evaluation...")
     val_df = get_results_df(val_ds, val_bl, val_indices, model, train_device = conf.testing.gpu)
     val_scores = get_scores(val_df)
-    
     return dict(
         zip(
             ["nDCG", "nDCG@5", "nDCG@1", "Spearman_ranking_correlation", "MAPE"],
@@ -59,12 +56,9 @@ def evaluate(conf, model):
 def main(conf):
     print("Defining and loading the model using parameters from the config file")
     model = define_and_load_model(conf)
-    
     print(f"Validating on the dataset: {conf.data_generation.valid_dataset_file}")
     scores = evaluate(conf, model)
-    
     print(f"Evaluation scores are:\n{scores}")
-
 
 if __name__ == "__main__":
     cs = ConfigStore.instance()

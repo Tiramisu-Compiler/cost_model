@@ -23,6 +23,7 @@ def main(conf: RecursiveLSTMConfig):
                         level = logging.DEBUG,
                         format = '%(asctime)s:%(levelname)s:  %(message)s')
     logging.info(f"Starting experiment {conf.experiment.name}")
+    train_device = torch.device(conf.training.gpu)
     
     # Defining the model
     logging.info("Defining the model")
@@ -34,11 +35,12 @@ def main(conf: RecursiveLSTMConfig):
         train_device=conf.training.gpu,
     )
     
-    train_device = torch.device(conf.training.gpu)
+    # Load model weights and continue training if specified  
     if conf.training.continue_training:
         print(f"Continue training using model from {conf.training.model_weights_path}")
         model.load_state_dict(torch.load(conf.training.model_weights_path, map_location=train_device))
-        
+    
+    # Enable gradient tracking for training
     for param in model.parameters():
         param.requires_grad = True
         
@@ -58,9 +60,9 @@ def main(conf: RecursiveLSTMConfig):
     train_file_path = os.path.join(conf.experiment.base_path, "batched/train/", f"{Path(conf.data_generation.train_dataset_file).parts[-1][:-4]}_GPU.pt")
     
     print(f"Loading first part of the training set {train_file_path} into device: {train_device}")
-    
     with open(train_file_path, "rb") as file:
         train_bl_1 = torch.load(train_file_path, map_location=train_device)
+    
     # Fuse loaded training batches
     train_bl = train_bl_1 + train_bl_2 if len(train_bl_2) > 0 else train_bl_1
     

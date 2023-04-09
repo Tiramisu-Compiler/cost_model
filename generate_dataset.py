@@ -33,7 +33,7 @@ def generate_datasets(conf):
     print(f"Reading the pkl files from {val_repr_pkl_output_folder} into memory for batching")
     val_ds, val_bl, val_indices, _ = load_pickled_repr(
         val_repr_pkl_output_folder,
-        max_batch_size = 1024,
+        max_batch_size = conf.data_generation.batch_size,
         store_device = "cpu",
         train_device = "cpu"
     )
@@ -76,7 +76,7 @@ def generate_datasets(conf):
     print(f"Reading the pkl files from {train_repr_pkl_output_folder} into memory for batching")
     train_ds, train_bl, train_indices, gpu_fitted_batches_index = load_pickled_repr(
         train_repr_pkl_output_folder,
-        max_batch_size = 1024,
+        max_batch_size = conf.data_generation.batch_size,
         store_device = conf.training.gpu,
         train_device = conf.training.gpu
     )
@@ -106,6 +106,7 @@ def generate_datasets(conf):
         
     # Write the second part of the batched training data into a file
     if len(train_bl_2) > 0:
+        # We test if the second part is not empty becuase there are cases where all the data fits in the GPU
         train_file_path = os.path.join( 
             conf.experiment.base_path, 
             "batched/train/", 

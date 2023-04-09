@@ -18,6 +18,7 @@ from scipy.stats import spearmanr
 from sklearn.metrics import ndcg_score
 import enum
 import os, psutil
+
 # An exception to limit the maximum number of allowed transformations 
 class NbTranformationException(Exception):
     pass
@@ -48,11 +49,6 @@ MAX_DEPTH = 5
 # Maximum length of expressions in the dataset
 MAX_EXPR_LEN = 62
 
-# Enumeration for the different exploration algorithms used to generate the data
-# class Exploration_method(int, enum.Enum):
-#    Beam_search = 0
-#    Recursive_beam_search = 1
-#    Reinforcement_learning = 2
 # Creates a template for the input representation
 def get_representation_template(program_dict, train_device="cpu"):
     # Set the max and min number of accesses allowed 
@@ -72,28 +68,27 @@ def get_representation_template(program_dict, train_device="cpu"):
         list(computations_dict.keys()),
         key=lambda x: computations_dict[x]["absolute_order"],
     )
-
+    # For each computation in the program
     for comp_index, comp_name in enumerate(ordered_comp_list):
-        
         comp_dict = computations_dict[comp_name]
+        # Check if the computation accesses conform to the minimum and maximum allowed
         if len(comp_dict["accesses"]) > max_accesses:
             raise NbAccessException
         
         if len(comp_dict["accesses"]) < min_accesses:
             raise NbAccessException
         
+        # Check if the number of iterators for this computation doesn't surpass the maximum allowed
         if len(comp_dict["iterators"]) > MAX_DEPTH:
             raise LoopsDepthException
-
+    
         comp_repr_template = []
-
         comp_repr_template.append(+comp_dict["comp_is_reduction"])
 
         iterators_repr = []
-        # Add a representation of each loop of this computation
         
+        # Add a representation of each loop of this computation
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
-            # TODOF does this work when iterators have the same name?
             iterator_dict = program_json["iterators"][iterator_name]
             # Create a unique code for each loop
             c_code = "C" + str(comp_index)
@@ -127,7 +122,6 @@ def get_representation_template(program_dict, train_device="cpu"):
         iterators_repr.append(c_code + "-TransformationTagsEnd")
         
         # Adding initial constraint matrix
-        # Remove the 1 mask from constraint matrix. Not necessary.
         iterators_repr.append(c_code+'-OgConstraintMatrixStart')
         iterators_repr.extend(['OgC']*((MAX_DEPTH*MAX_DEPTH*2)-2))
         iterators_repr.append(c_code+'-OgConstraintMatrixEnd')
@@ -154,8 +148,7 @@ def get_representation_template(program_dict, train_device="cpu"):
         ] + padded_write_matrix.flatten().tolist()
         comp_repr_template.extend(write_access_repr)
 
-        # Pad the read access matrix and add it to the representation
-        # Todo add details about the read accesses 
+        # Pad the read access matrix and add it to the representation 
         read_accesses_repr = []
         for read_access_dict in comp_dict["accesses"]:
             read_access_matrix = pad_access_matrix(
@@ -167,16 +160,15 @@ def get_representation_template(program_dict, train_device="cpu"):
                 + read_access_matrix.flatten().tolist()
             )
             read_accesses_repr.extend(read_access_repr)
-
-        
         access_repr_len = (MAX_DEPTH + 1) * (MAX_DEPTH + 2) + 1 + 1
-        
         read_accesses_repr.extend(
             [0] * access_repr_len * (max_accesses - len(comp_dict["accesses"]))
         )
         comp_repr_template.extend(read_accesses_repr)
         
+        # Add the representation of this computation to the list of containing all computations
         comps_repr_templates_list.append(comp_repr_template)
+        
         # Create a mapping between the features and their position in the representation
         comps_indices_dict[comp_name] = comp_index
         for j, element in enumerate(comp_repr_template):
@@ -211,7 +203,6 @@ def get_representation_template(program_dict, train_device="cpu"):
         # Create a mapping between the features and their position in the representation
         loops_repr_templates_list.append(loop_repr_template)
         loops_indices_dict[loop_name] = loop_index
-
         for j, element in enumerate(loop_repr_template):
             if isinstance(element, str):
                 loops_placeholders_indices_dict[element] = (loop_index, j)
@@ -221,11 +212,10 @@ def get_representation_template(program_dict, train_device="cpu"):
     
     # Make sure no fusion was applied on this version and get the original tree structure 
     assert "fusions" not in no_sched_json or no_sched_json["fusions"] == None
-    
     orig_tree_structure = no_sched_json["tree_structure"]
     tree_annotation = copy.deepcopy(orig_tree_structure)
     
-    
+    # Add necessary attributes to the tree_structure
     prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device="cpu")
     
     return (
@@ -236,7 +226,8 @@ def get_representation_template(program_dict, train_device="cpu"):
         loops_placeholders_indices_dict
     )
 
-# TODO add description
+# Change the structure of the tree annotations to contain a uinque index for each loop and a has_comps boolean
+# This is used to prepare for the recusive embedding of the program during the training
 def update_tree_atributes(node, loops_indices_dict, comps_indices_dict, train_device="cpu"):
         if "roots" in node :
             for root in node["roots"]:
@@ -277,13 +268,14 @@ def get_schedule_representation(
     loops_repr = copy.deepcopy(loops_repr_templates_list)
     comps_expr_repr = []
     
+    # Get an ordered list of computations from the program JSON
     computations_dict = program_json["computations"]
     ordered_comp_list = sorted(
         list(computations_dict.keys()),
         key=lambda x: computations_dict[x]["absolute_order"],
     )
     
-    
+    # For each computation
     for comp_index, comp_name in enumerate(ordered_comp_list):
         comp_dict = program_json["computations"][comp_name]
         comp_schedule_dict = schedule_json[comp_name]
@@ -304,15 +296,12 @@ def get_schedule_representation(
         # If fusion was applied, save which two loops were fused together
         if "fusions" in schedule_json and schedule_json["fusions"]:
             for fusion in schedule_json["fusions"]:
-
                 if comp_name in fusion:
                     fused_levels.append(fusion[2])
-
         
         c_code = "C" + str(comp_index)
         # Loop representation for this computation
         for iter_i, iterator_name in enumerate(comp_dict["iterators"]):
-
             l_code = c_code + "-L" + str(iter_i)
             
             # Check whether parallelization was applied and put the tag in its corresponding position in the computation representation
@@ -387,6 +376,7 @@ def get_schedule_representation(
         
         comps_repr[tags_start[0]][tags_start[1] : tags_end[1] + 1] = padded_tags
         
+        # Add the padded original constraints matrix to the representation
         ogc_start = comps_placeholders_indices_dict[c_code+'-OgConstraintMatrixStart']
         
         ogc_end = comps_placeholders_indices_dict[c_code+'-OgConstraintMatrixEnd']
@@ -396,7 +386,9 @@ def get_schedule_representation(
         assert(MAX_DEPTH*MAX_DEPTH*2 == nb_mat_elements)
         
         comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name).flatten().tolist()
-                              
+        
+        
+        # Add the padded original constraints vector to the representation
         ogv_start = comps_placeholders_indices_dict[c_code+'-OgConstraintVectorStart']
         
         ogv_end = comps_placeholders_indices_dict[c_code+'-OgConstraintVectorEnd']
@@ -405,6 +397,7 @@ def get_schedule_representation(
         
         comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name)
         
+        # Add the padded transformed constraints vector to the representation
         c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
         
         c_end = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixEnd']
@@ -463,7 +456,7 @@ def get_schedule_representation(
             comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
             loop_schedules_dict[comp_innermost_loop]["unrolled"] = 1
                 
-            assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or                                                                                           loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
+            assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
             
             loop_schedules_dict[comp_innermost_loop]["unroll_factor"] = int(comp_schedule_dict["unrolling_factor"])
             
@@ -521,6 +514,7 @@ def get_schedule_representation(
     comp_transformed_iterators = get_comp_iterators_from_tree_struct(schedule_json, comp_name)    
     # Check if any iterators were removed because of fusion
     if (len(program_json["iterators"])>len(comp_transformed_iterators)):
+        # If this is the case, add the missing vectors with zeros in all the transformations
         removed_iterators = list(set(program_json["iterators"]) - set(comp_transformed_iterators))
         for loop_name in removed_iterators:
             l_code = "L" + loop_name
@@ -576,7 +570,7 @@ def get_func_repr_task(input_q, output_q):
             
         # Get the JSON representation of the program features
         program_json = programs_dict[function_name]["program_annotation"]
-        # Extract the representation template for the datapoints
+        # Extract the representation template for the datapoint
         try:
             (
                 prog_tree,
@@ -590,13 +584,13 @@ def get_func_repr_task(input_q, output_q):
             )
         
         except LoopsDepthException:
-            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
+            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program
             nb_dropped_loops_depth =+ len(
                 programs_dict[function_name]["schedules_list"]
             )
             continue
         except NbAccessException:
-            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program.
+            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program
             nb_dropped_accesses_len =+ len(
                 programs_dict[function_name]["schedules_list"]
             )
@@ -632,6 +626,7 @@ def get_func_repr_task(input_q, output_q):
                 nb_dropped += 1
                 nb_pruned += 1
                 continue
+                
             # Calculate the speed up obtained from applying the list of transformations spesified by the schedule
             sched_speedup = program_exec_time / sched_exec_time
             
@@ -748,15 +743,16 @@ class Dataset_parallel:
         self.nb_pruned = 0
         # List of dropped functions 
         self.dropped_funcs = []
-#         # Saved data attributes for analysis and expirements
+        # Saved data attributes for analysis and expirements
         self.batched_datapoint_attributes = []
-        # number of loaded datapoints
+        # Number of loaded datapoints
         self.nb_datapoints = 0
+        # number of batches that can fit in the GPU
         self.gpu_fitted_batches_index = -1
         processes_output_list = []
         programs_dict = {}
         batches_dict = dict()
-        if just_load_pickled_repr: #just load the existing repr
+        if just_load_pickled_repr: # Just load the existing repr
             
             for pkl_part_filename in tqdm(list(Path(repr_pkl_output_folder).iterdir())):
                 pkl_part_filename = str(pkl_part_filename)
@@ -764,6 +760,8 @@ class Dataset_parallel:
                     lst = pickle.load(f)
                 processes_output_list.extend(lst)
         else:
+            # Separate the function according to the nb_processes parameter
+            # Each process will extract the representation for a subset of functions and save that representation into a pkl file
             manager = multiprocessing.Manager()
             
             processs = []
@@ -801,6 +799,7 @@ class Dataset_parallel:
             
             for i in range(nb_processes):
                 process_id, pkl_part_filename = output_queue.get()
+                # If we want to do batching immediatly after the processes are done, we read the pkl files from the child processes
                 if not no_batching:
                     with open(pkl_part_filename, 'rb') as f:
                         lst = pickle.load(f)
@@ -829,14 +828,29 @@ class Dataset_parallel:
 
             def can_set_default_eval(x, y):
                 return 0
+        # If we don't want to proceed to batching, stop here
+        # This is used so that the memory for each process if freed before batching
+        # To do that we return after the processes are done writing their pkls, then we call instanciate the class again to read the written pkls
         if no_batching:
             print("Parameter no_batching is True. Stopping after the PKL files were saved.")
             return
+        
         print("Assembling schedules from each function")
         for function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned, nb_datapoints, tree_footprint, local_function_dict in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
                 tree_indices_to_device(node, train_device="cpu")
-            batches_dict[tree_footprint] = batches_dict.get(tree_footprint, {'tree': local_function_dict['tree'], 'comps_tensor_list': [], 'loops_tensor_list': [ ], 'datapoint_attributes_list': [], 'comps_expr_tree_list': [], 'speedups_list': [], 'exec_time_list': [], "func_id": []})
+            batches_dict[tree_footprint] = batches_dict.get(
+                tree_footprint, {
+                    'tree': local_function_dict['tree'], 
+                    'comps_tensor_list': [], 
+                    'loops_tensor_list': [ ], 
+                    'datapoint_attributes_list': [], 
+                    'comps_expr_tree_list': [], 
+                    'speedups_list': [], 
+                    'exec_time_list': [], 
+                    "func_id": []
+                }
+            )
             batches_dict[tree_footprint]['comps_tensor_list'].extend(local_function_dict['comps_tensor_list'])
             batches_dict[tree_footprint]['loops_tensor_list'].extend(local_function_dict['loops_tensor_list'])
             batches_dict[tree_footprint]['datapoint_attributes_list'].extend(local_function_dict['datapoint_attributes_list'])
@@ -850,16 +864,16 @@ class Dataset_parallel:
     
             self.nb_pruned += nb_pruned
             self.nb_datapoints += len(local_function_dict['speedups_list'])
+        # Delete unused variables
         del processes_output_list
         del programs_dict
         gc.collect()
-        storing_device = torch.device(store_device)
         
         print("Batching data")
+        storing_device = torch.device(store_device)
         # For each tree footprint in the dataset
-        # A footprint represents the structure of each function. We batch functions according to their tree footprint so that the forward pass to the model can be correctly executed.
+        # A footprint represents the structure of each function. We batch functions according to their tree footprint so that the forward pass to the model can be correctly executed
         for tree_footprint in tqdm(batches_dict):
-            
             # Shuffling the lists inside each footprint to avoid having batches with very low program diversity
             zipped = list(
                 zip(
@@ -879,11 +893,6 @@ class Dataset_parallel:
                 batches_dict[tree_footprint]["loops_tensor_list"],
                 batches_dict[tree_footprint]["speedups_list"],
             ) = zip(*zipped)
-            
-            if storing_device.type == "cuda":
-                with open("/data/kb4083/cost_model/cuda_status.txt", "a") as f:
-                    allocated_mem = ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )
-                    f.write(f'working on a tree footprint of length {len(batches_dict[tree_footprint]["speedups_list"])} The selected device {storing_device} is already {allocated_mem*100}% full\n')
                 
             # Split the data into batches of size max_batch_size
             for chunk in range( 0, len(batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
@@ -898,7 +907,7 @@ class Dataset_parallel:
                         chunk: chunk + max_batch_size
                     ]
                 )
-                # Here we separate the comps tensor to get the transformation vectors
+                # We separate the comps tensor to get the transformation vectors
                 x = torch.cat( batches_dict[tree_footprint]["comps_tensor_list"][ chunk : chunk + max_batch_size ], 0)
                 
                 batch_size, num_comps, __dict__ = x.shape
@@ -906,6 +915,7 @@ class Dataset_parallel:
                 (first_part, vectors, third_part) = seperate_vector(
                     x, num_transformations=4, pad=False
                 )
+                # Append a new batch to the list of batched inputs
                 self.batched_X.append(
                     (
                         batches_dict[tree_footprint]["tree"],
@@ -916,6 +926,7 @@ class Dataset_parallel:
                         torch.cat(batches_dict[tree_footprint]["comps_expr_tree_list"][chunk : chunk + max_batch_size],0).to(storing_device),
                     )
                 )
+                # Append a new batch to the list of batched labels
                 self.batched_Y.append(
                     torch.FloatTensor(
                         batches_dict[tree_footprint]["speedups_list"][
@@ -934,7 +945,7 @@ class Dataset_parallel:
         del batches_dict
         gc.collect()
         
-        # Save the size of data that can fit into the GPU. Will be used later when loading the data.
+        # Save the size of data that can fit into the GPU. Will be used later when loading the data
         if self.gpu_fitted_batches_index == -1:
             self.gpu_fitted_batches_index = len(self.batched_X)
         
@@ -945,19 +956,20 @@ class Dataset_parallel:
                 f"\nNumber of dropped points from LinAlgError exception: {self.nb_dropped_transformation_list_issue}"
                 f"\nNumber of dropped points from pruning: {self.nb_pruned}"
                 )
-    
+    # Returns batch "index" or range of batches
     def __getitem__(self, index):
         if isinstance(index, slice):
             start, stop, step = index.indices(len(self))
             return [self[i] for i in range(start, stop, step)]
         elif isinstance(index, int):
             return (self.batched_X[index], self.batched_Y[index])
-
+    
+    # Length of the dataset
     def __len__(self):
         return len(self.batched_Y)    
 
+# Function to read the pkls written by the load_data_into_pkls_parallel function, batch the loaded data and return the batched data to be saved
 def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_device="cpu", train_device="cpu"):
-    
     dataset = Dataset_parallel(
         None, 
         max_batch_size, 
@@ -972,16 +984,9 @@ def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_d
     for i in indices:
         batches_list.append(dataset[i])
 
-    return dataset, batches_list, indices, dataset.gpu_fitted_batches_index        
-    
-def tree_indices_to_device(node, train_device):
-    node['loop_index'] = node['loop_index'].to(train_device, non_blocking=True)
-    if 'computations_indices' in node:
-        node['computations_indices'] = node['computations_indices'].to(
-            train_device, non_blocking=True)
-    for child in node['child_list']:
-        tree_indices_to_device(child, train_device)   
+    return dataset, batches_list, indices, dataset.gpu_fitted_batches_index         
 
+# Function to write the representation of the dataset into pkl files. This is done in parallel using the multiprocessing module 
 def load_data_into_pkls_parallel(train_val_dataset_file, nb_processes=15, repr_pkl_output_folder=None, overwrite_existing_pkl=False):
     
     if Path(repr_pkl_output_folder).is_dir() and overwrite_existing_pkl:
@@ -1002,8 +1007,8 @@ def load_data_into_pkls_parallel(train_val_dataset_file, nb_processes=15, repr_p
         store_device="cpu", 
         train_device="cpu"
     )         
-    return
-    
+    return  
+
 # Returns a representation of the tree structure of the program
 def get_tree_footprint(tree):
     if "roots" in tree :
@@ -1023,80 +1028,16 @@ def get_tree_footprint(tree):
     footprint += "</L" + str(int(tree["loop_index"])) + ">"
     return footprint
 
-
-# load the data from the .pkl or .json dataset file and splits it according to the split_ratio parameter
-# Uses the Dataset class
-def load_data(
-    train_val_dataset_file,
-    split_ratio=None,
-    max_batch_size=2048,
-    drop_sched_func=None,
-    drop_prog_func=None,
-    default_eval=None,
-    speedups_clip_func=None,
-    store_device="cpu",
-    train_device="cpu",
-):
-    print("loading batches from: " + train_val_dataset_file)
-    
-    # create an instance of the Dataset class
-    dataset = Dataset(
-        train_val_dataset_file,
-        max_batch_size,
-        drop_sched_func,
-        drop_prog_func,
-        default_eval,
-        speedups_clip_func,
-        store_device=store_device,
-        train_device=train_device,
-    )
-    # If no split ratio is specified use the common 80 20 split
-    if split_ratio == None:
-        split_ratio = 0.2
-    if split_ratio > 1:
-        validation_size = split_ratio
-    else:
-        validation_size = int(split_ratio * len(dataset))
-    indices = list(range(len(dataset)))
-
-    # Divide the dataset indecies into validation and training 
-    val_batches_indices, train_batches_indices = (
-        indices[:validation_size],
-        indices[validation_size:],
-    )
-    val_batches_list = []
-    train_batches_list = []
-    for i in val_batches_indices:
-        val_batches_list.append(dataset[i])
-    for i in train_batches_indices:
-        train_batches_list.append(dataset[i])
-    print("Data loaded")
-    print(
-        "Sizes: " + str((len(val_batches_list), len(train_batches_list))) + " batches"
-    )
-    return (
-        dataset,
-        val_batches_list,
-        val_batches_indices,
-        train_batches_list,
-        train_batches_indices,
-    )
-
 # A function to extract the transformations applied on a spesific computation in the form of a vector of tags
 # Padding is added if the number of transformations is less than the maximum value of MAX_NUM_TRANSFORMATIONS
-# Currently our dataset represents transformations in two different formats.
-#         1- in the form of matrices from the polyhedral representation
-#         2- in the form of tags for each transformation
-# We generated a variaty of representations to test which one is more useful for our spesfici usage
-# In this function we will be unifying all of the dataset into the tags representation 
 # The tag representation is as follows:
-#         ['type_of_transformation', 'first_interchange_loop', 'second_interchange_loop', 'reversed_loop', 'first_skewing_loop', 'second_skewing_loop', 'first_skew_factor', 'second_skew_factor']
+#         ['type_of_transformation', 'first_interchange_loop', 'second_interchange_loop', 'reversed_loop', 'first_skewing_loop', 'second_skewing_loop', 'third_skewing_loop', 'skew_parameter_1', 'skew_parameter_2', 'skew_parameter_3', 'skew_parameter_4', 'skew_parameter_5', 'skew_parameter_6', 'skew_parameter_7', 'skew_parameter_8', 'skew_parameter_9']
 #     Where the type_of_transformation tag is:
 #         - 0 for no transformation being applied
 #         - 1 for loop interchange
 #         - 2 for loop reversal
 #         - 3 for loop skewing
-        
+# In the case for skewing we are specifying the new values for the transformed submatrix
 def get_padded_transformation_tags(
     program_json, schedule_json, comp_name
 ):
@@ -1142,7 +1083,7 @@ def get_datapoint_attributes(func_name, program_dict, schedule_index, tree_footp
         tree_footprint,
         speedup,
     )
-
+# Add padding to the read/write access matrices
 def pad_access_matrix(access_matrix):
     access_matrix = np.array(access_matrix)
     access_matrix = np.c_[np.ones(access_matrix.shape[0]), access_matrix]
@@ -1155,6 +1096,7 @@ def pad_access_matrix(access_matrix):
 
     return padded_access_matrix
 
+# Tranfrom the access relations to matrices
 def isl_to_write_matrix(isl_map):
     comp_iterators_str = re.findall(r"\[(.*)\]\s*->", isl_map)[0]
     buffer_iterators_str = re.findall(r"->\s*\w*\[(.*)\]", isl_map)[0]
@@ -1247,8 +1189,6 @@ def get_results_df(
     df["target"] = np.array(targets)
 
     df["APE"] = np.abs(df.target - df.prediction) / df.target * 100
-    df["sched_str"] = df["sched_str"].apply(lambda x: simplify_sched_str(x))
-
     return df
 
 # Calculate the Normalized Discounted Cumulative Gain while only considiring the top rated schedule (k=1)
@@ -1284,7 +1224,7 @@ def function_wise_ape(g):
     score = np.mean(g["APE"])
     return pd.Series(dict(MAPE=score))
 
-
+# calculates the model scores from the dataframe
 def get_scores(df):
     with tqdm(total=6) as pbar:
         df_spearman = df.groupby("name").apply(function_wise_spearman).reset_index()
@@ -1309,27 +1249,6 @@ def get_scores(df):
         .merge(df_mape, on="name")
     )
     return scores_df
-
-
-def simplify_sched_str(
-    sched_str,
-):
-
-    if sched_str.count("M") == 1:
-        return sched_str
-    comps = re.findall("C\d+", sched_str)
-    comps = set(comps)
-
-    mats = set(re.findall(r"M\({[\dC\,]+},([\d\,\-]+)", sched_str))
-    comps_per_mat = {mat: [] for mat in mats}
-    new_mats_str = ""
-    for mat in comps_per_mat:
-        for mat_part in re.findall("M\({[C\d\,]+}," + mat, sched_str):
-            comps_per_mat[mat].extend(re.findall("C\d+", mat_part))
-        new_mats_str += "M({" + ",".join(sorted(comps_per_mat[mat])) + "}," + mat + ")"
-    return re.sub("(M\({[\dC\,]+},[\d\,\-]+\))+", new_mats_str, sched_str)
-
-
 
 # TODO
 def has_skippable_loop_1comp(
@@ -1391,7 +1310,6 @@ def has_skippable_loop_1comp(
     if iterators[-1] in used_iterators:
         if len(comp_dict["accesses"]) > 2:
             return False
-
     return True
 
 
@@ -1569,7 +1487,7 @@ def get_comp_iterators_from_tree_struct(schedule_json, comp_name):
     
     return iterators
 
-# One-hot encoding for expressions and its datatype
+# One-hot encoding for expressions and their datatypes
 def get_expr_repr(expr, comp_type):
         expr_vector = []
         if(expr == "add"):
@@ -1598,6 +1516,7 @@ def get_expr_repr(expr, comp_type):
             comp_type_vector = [0, 0, 1]
             
         return expr_vector + comp_type_vector
+    
 # Get the representation of the whole expression recursively
 def get_tree_expr_repr(node, comp_type):
         expr_tensor = []
@@ -1612,30 +1531,30 @@ def get_tree_expr_repr(node, comp_type):
 # A constraint matrix is the set of linear inequalities that describes the iteration domain.
 # Example:
 # if the iteration domain D is the follwoing
-#     {i < 128
-#      i > 0
-# D =  j < 32
-#      j > 0
-#      k < 64
-#      k > 0}
+#     {i > 0
+#      i < 128
+# D =  j > 0
+#      j < 32
+#      k > 0
+#      k < 64}
 # The iterator vector is 
 # x = [i, 
 #      j, 
 #      k]
 # The constraint matrix A would be:
-#     [1,  0,  0,
-#      -1, 0,  0,
-# A=   0,  1,  0,
-#      0, -1,  0,
-#      0,  0,  1,
-#      0,  0, -1]
+#     [-1,   0,   0,
+#       1,   0,   0,
+# A=    0,  -1,   0,
+#       0,   1,   0,
+#       0,   0,  -1,
+#       0,   0,   1]
 # The second hand side of the equation b is the vector:
-#     b= [128,
+#     b= [0,
+#         128,
 #         0,
 #         32,
 #         0,
-#         64,
-#         0]
+#         64]
 # Since:
 #    D = Ax<b
 # Get the matrix describing the initial constraints for this program
@@ -1662,6 +1581,7 @@ def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name):
     return result
 
 # Returns a vector that represents the right hand sise of teh constraint matrix inequalities
+# (The vector b from the previous example)
 def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name):
     iterators_list = program_json["computations"][comp_name]["iterators"]
     result = []
@@ -1677,10 +1597,15 @@ def get_padded_second_side_of_the_constraint_equations_original(program_json, sc
     result = result + [0]*(MAX_DEPTH*2-len(result))
     return result
 
-# Get the matrix describing the iteration domain after applying a sequence of affine transformations                           
+# Get the matrix describing the iteration domain after applying a sequence of affine transformations
+# The transformed constraint matrix is: the original constraint matrix multiplied by the inverse of the transformation matrix
 def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name):
     iterators_list = program_json["computations"][comp_name]["iterators"]
+    
+    # Extract the transformations matrix for this schedule
     transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name)
+    
+    # Create the initial constraint matrix without any padding
     result = []
     for i in iterators_list:
         for j in range(2):
@@ -1688,11 +1613,14 @@ def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_na
                 result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
             else:
                 result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
-    
+    # Get the inverse of the transformation matrix
     inverse = np.linalg.inv(transformation_matrix)
-        
+    
+    # Multiply thw two to gte the transformed constraint matrix
     result = np.matmul(result, inverse)
     result = np.array(result)
+    
+    # Add padding
     result = np.pad(
         result,
         [
@@ -1711,6 +1639,7 @@ def is_int(s):
         return s[1:].isdigit()
     return s.isdigit()
 
+# Helper function to return lines from the constraint matrix
 def format_bound(iterator_name, bound, iterators_list, is_lower):
     output = []
     for i in iterators_list:
@@ -1881,6 +1810,7 @@ def get_schedule_str_for_pruning(program_json, sched_json):
                 dim_name + "_Uinner",
             )
     return sched_str
+
 # Returns a string representation of a schedule and the transformations applied in it
 def get_schedule_str(program_json, sched_json):
     comp_name = [
@@ -2005,6 +1935,7 @@ def get_schedule_str(program_json, sched_json):
             )
     return sched_str
 
+# Separate a computation vector into 3 parts where the middle part is the transformation vectors
 def seperate_vector(
     X: torch.Tensor, num_transformations: int = 4, pad: bool = True, pad_amount: int = 5
 ) -> torch.Tensor:
@@ -2023,4 +1954,10 @@ def seperate_vector(
             vectors.append(vector)
     return (first_part, torch.cat(vectors[0:], dim=1), third_part)
 
-
+def tree_indices_to_device(node, train_device):
+    node['loop_index'] = node['loop_index'].to(train_device, non_blocking=True)
+    if 'computations_indices' in node:
+        node['computations_indices'] = node['computations_indices'].to(
+            train_device, non_blocking=True)
+    for child in node['child_list']:
+        tree_indices_to_device(child, train_device)    

@@ -5,13 +5,12 @@ import gc
 import hydra
 
 from hydra.core.config_store import ConfigStore
-from utils.config import *
 from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
 
 @hydra.main(config_path="conf", config_name="config")
-def main(conf: RecursiveLSTMConfig):
+def main(conf):
     # Defining logger
     log_filename = [part for part in conf.training.log_file.split('/') if len(part) > 3][-1]
     log_folder_path = os.path.join(conf.experiment.base_path, "logs/")
@@ -103,6 +102,4 @@ def main(conf: RecursiveLSTMConfig):
 
 
 if __name__ == "__main__":
-    cs = ConfigStore.instance()
-    cs.store(name="experiment_config", node=RecursiveLSTMConfig)
     main()

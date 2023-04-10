@@ -1,10 +1,7 @@
 import io
-
 import hydra
 import torch
 from hydra.core.config_store import ConfigStore
-
-from utils.config import *
 from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
@@ -35,8 +32,8 @@ def define_and_load_model(conf):
 def evaluate(conf, model):
     
     print("Loading the dataset...")
-    val_ds, val_bl, val_indices = load_pickled_repr(
-        os.path.join(conf.experiment.base_path ,'pickled/pickled_')+Path(conf.data_generation.valid_dataset_file), 
+    val_ds, val_bl, val_indices, _ = load_pickled_repr(
+        os.path.join(conf.experiment.base_path ,'pickled/pickled_')+Path(conf.data_generation.valid_dataset_file).parts[-1][:-4], 
         max_batch_size = 1024, 
         store_device=conf.testing.gpu, 
         train_device=conf.testing.gpu
@@ -61,6 +58,4 @@ def main(conf):
     print(f"Evaluation scores are:\n{scores}")
 
 if __name__ == "__main__":
-    cs = ConfigStore.instance()
-    cs.store(name="experiment_config", node=RecursiveLSTMConfig)
     main()

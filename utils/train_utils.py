@@ -3,14 +3,9 @@ import math
 import os
 import random
 import time
-
-
 import torch
 import wandb
 from torch.optim.lr_scheduler import OneCycleLR
-
-from utils.config import *
-
 from tqdm import tqdm
 
 # Calculate the mean absolute percentage error

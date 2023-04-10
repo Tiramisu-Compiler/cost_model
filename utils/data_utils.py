@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-from utils.config import *
 from scipy.stats import spearmanr
 from sklearn.metrics import ndcg_score
 import enum

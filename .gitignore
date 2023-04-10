@@ -5,10 +5,13 @@ __pycache__/
 *$py.class
 conf/*.yaml
 *.pkl 
+.idea/
 pickled_repr/
 notebooks/
 
 dataset/
+dataset_new/
+dataset_new_old/
 backup/
 nodebooks/
 weights/
@@ -180,3 +183,5 @@ outputs/
 wandb/
 *.ipynb
 logs/log_Recursive_LSTM_v2_test_13+4+2.6.txt
+conf/.ipynb_checkpoints/
+batched/

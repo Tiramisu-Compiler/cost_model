@@ -1,0 +1,48 @@
+experiment:
+    name: "data_scalability_20m"
+    base_path: "/data/kb4083/cost_model"
+
+# /data/kb4083/datasets/sample_20m_test.pkl
+# /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
+# /data/mm12191/datasets/benchmarks_mats1.pkl
+data_generation:
+    train_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_val.pkl"
+    benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
+    dataset_name:  "dataset_scalability"
+    batch_size: 1024
+    nb_processes: 170
+
+
+training: 
+    log_file: "logs.txt" # Just the name
+    lr: 0.001
+    max_epochs: 2000
+    gpu: "cuda:4"
+
+testing:
+    datasets: # choose from valid, bench.
+        # - valid
+        - bench
+    checkpoint: "best_model_ACTUAL_20m_2000_scalability_experiment.pt"
+
+wandb:
+    use_wandb: True
+    project: "release_model"
+    
+model: 
+    input_size: 846
+    comp_embed_layer_sizes:
+        - 600
+        - 350
+        - 200
+        - 180
+    drops:
+        - 0.050
+        - 0.050
+        - 0.050
+        - 0.050
+        - 0.050
+
+defaults:
+  - override hydra/job_logging: disabled

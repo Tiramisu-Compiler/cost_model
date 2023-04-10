@@ -3,17 +3,12 @@ import math
 import os
 import random
 import time
-
-
 import torch
 import wandb
 from torch.optim.lr_scheduler import OneCycleLR
-
-from utils.config import *
-
 from tqdm import tqdm
 
-
+# Calculate the mean absolute percentage error
 def mape_criterion(inputs, targets):
     eps = 1e-5
     return 100 * torch.mean(torch.abs(targets - inputs) / (targets + eps))
@@ -38,15 +33,19 @@ def train_model(
     best_model = None
     hash = random.getrandbits(16)
     dataloader_size = {"train": 0, "val": 0}
+    
+    # Calculate data size for each dataset. Used to caluclate the loss duriing the training  
     for item in dataloader["train"]:
         label = item[1]
         dataloader_size["train"] += label.shape[0]
     for item in dataloader["val"]:
         label = item[1]
         dataloader_size["val"] += label.shape[0]
-
+    
+    # Send model to the training device
     model = model.to(train_device)
-
+    
+    # Use the 1cycle learning rate policy
     scheduler = OneCycleLR(
         optimizer,
         max_lr=max_lr,
@@ -55,46 +54,58 @@ def train_model(
     )
     for epoch in range(num_epochs):
         epoch_start = time.time()
-
         for phase in ["train", "val"]:
             if phase == "train":
+                # Enable gradient tracking for training
                 model.train()
             else:
+                # Disable gradient tracking for evaluation
                 model.eval()
             running_loss = 0.0
             pbar = tqdm(dataloader[phase])
+            
+            # For each batch in the dataset
             for inputs, labels in pbar:
+                # Send the labels and inputs to the training device
                 original_device = labels.device
                 inputs = (
                     inputs[0],
                     inputs[1].to(train_device),
                     inputs[2].to(train_device),
+                    inputs[3].to(train_device),
+                    inputs[4].to(train_device),
+                    inputs[5].to(train_device),
                 )
                 labels = labels.to(train_device)
-
+                
+                # Reset the gradients for all tensors
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == "train"):
+                    # Get the model predictions
                     outputs = model(inputs)
-                    # print(outputs.get_device(),labels.get_device())
                     assert outputs.shape == labels.shape
+                    
+                    # Calculate the loss
                     loss = criterion(outputs, labels)
-
+                    
                     if phase == "train":
+                        # Backpropagation
                         loss.backward()
                         optimizer.step()
-
                 pbar.set_description("Loss: {:.3f}".format(loss.item()))
                 running_loss += loss.item() * labels.shape[0]
+                # Send the labels back to the original device 
                 labels = labels.to(original_device)
                 epoch_end = time.time()
-
             epoch_loss = running_loss / dataloader_size[phase]
-
             if phase == "val":
+                # Append loss to the list of validation losses
                 losses.append((train_loss, epoch_loss))
+                # If we reached a new minimum loss
                 if epoch_loss <= best_loss:
                     best_loss = epoch_loss
+                    # Save the model weights at this checkpoint
                     best_model = copy.deepcopy(model)
                     saved_model_path = os.path.join(config.experiment.base_path, "weights/")
                     if not os.path.exists(saved_model_path):
@@ -108,7 +119,7 @@ def train_model(
                         model.state_dict(),
                         full_path,
                     )
-
+                # Track progress using the wandb platform
                 if config.wandb.use_wandb:
                     wandb.log(
                         {

@@ -23,12 +23,6 @@ import os, psutil
 class NbTranformationException(Exception):
     pass
 
-class RandomMatrix(Exception):
-    pass
-
-class ContradictingTilingParameters(Exception):
-    pass
-
 # An exception to limit the maximum number of read-write accesses. 
 class NbAccessException(Exception):
     pass
@@ -442,10 +436,9 @@ def get_schedule_representation(
             ):
                 loop_schedules_dict[tiled_loop]["tiled"] = 1
                 
-                if (not (loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
-                    comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
-                ))):
-                    raise ContradictingTilingParameters
+                # Make sure this loop either hasn't yet been tiled or has beeen tiled by the same factor
+                assert(loop_schedules_dict[tiled_loop]["tile_factor"] == 0 or loop_schedules_dict[tiled_loop]["tile_factor"] == int(
+                    comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]))
                 loop_schedules_dict[tiled_loop]["tile_factor"] = int(
                     comp_schedule_dict["tiling"]["tiling_factors"][tiled_loop_index]
                 )
@@ -455,7 +448,8 @@ def get_schedule_representation(
             
             comp_innermost_loop = get_comp_iterators_from_tree_struct(schedule_json, comp_name)[-1]
             loop_schedules_dict[comp_innermost_loop]["unrolled"] = 1
-                
+            
+            # Make sure this loop either hasn't yet been unrolled or has beeen unrolled by the same factor
             assert (loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == 0 or loop_schedules_dict[comp_innermost_loop]["unroll_factor"] == int(comp_schedule_dict["unrolling_factor"]))
             
             loop_schedules_dict[comp_innermost_loop]["unroll_factor"] = int(comp_schedule_dict["unrolling_factor"])
@@ -554,15 +548,9 @@ def get_func_repr_task(input_q, output_q):
     function_name_list = list(programs_dict.keys())
     dropped_funcs = []
     local_list = []
-    nb_dropped_loops_depth = 0
-    nb_dropped_accesses_len = 0
     for function_name in tqdm(function_name_list):
         nb_dropped = 0
-        nb_dropped_random_matrix = 0
-        nb_dropped_contradicting_tiling_params = 0
-        nb_dropped_transformation_list_issue = 0
-        nb_pruned = 0
-        nb_datapoints = 0
+        
         # Check whether this function should be dropped
         if drop_program(programs_dict[function_name], function_name):
             dropped_funcs.append(function_name)
@@ -570,6 +558,7 @@ def get_func_repr_task(input_q, output_q):
             
         # Get the JSON representation of the program features
         program_json = programs_dict[function_name]["program_annotation"]
+        
         # Extract the representation template for the datapoint
         try:
             (
@@ -583,15 +572,9 @@ def get_func_repr_task(input_q, output_q):
                 train_device=train_device,
             )
         
-        except LoopsDepthException:
+        except (LoopsDepthException, NbAccessException):
             # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program
-            nb_dropped_loops_depth =+ len(
-                programs_dict[function_name]["schedules_list"]
-            )
-            continue
-        except NbAccessException:
-            # If one of the two exceptions was raised, we drop all the schedules for that program and skip to the next program
-            nb_dropped_accesses_len =+ len(
+            nb_dropped =+ len(
                 programs_dict[function_name]["schedules_list"]
             )
             continue
@@ -624,18 +607,10 @@ def get_func_repr_task(input_q, output_q):
             # Check if this schedule should be dropped
             if drop_schedule(programs_dict[function_name], schedule_index) or (not sched_exec_time):
                 nb_dropped += 1
-                nb_pruned += 1
                 continue
                 
             # Calculate the speed up obtained from applying the list of transformations spesified by the schedule
             sched_speedup = program_exec_time / sched_exec_time
-            
-            # Check whether we can set a default value for this speedup through the can_set_default_eval function.
-            def_sp = can_set_default_eval(programs_dict[function_name]["program_annotation"], schedule_json)
-            
-            # If the function returns 0, this means no default value was spesified
-            if def_sp > 0:
-                sched_speedup = def_sp
                 
             # Check whether we can clip the obtained speedup
             sched_speedup = speedup_clip(sched_speedup)
@@ -654,18 +629,6 @@ def get_func_repr_task(input_q, output_q):
                 # If the number of transformations exceeded the specified max, we skip this schedule
                 nb_dropped += 1 
                 continue
-            except RandomMatrix :
-                nb_dropped += 1
-                nb_dropped_random_matrix += 1
-                continue
-            except ContradictingTilingParameters :
-                nb_dropped += 1
-                nb_dropped_contradicting_tiling_params += 1
-                continue
-            except np.linalg.LinAlgError:
-                nb_dropped += 1
-                nb_dropped_transformation_list_issue += 1
-                continue
                 
             # Get information about this datapoint (memory use, execution time...)
             datapoint_attributes = get_datapoint_attributes(
@@ -680,19 +643,14 @@ def get_func_repr_task(input_q, output_q):
                 comps_expr_repr
             )
             local_function_dict['speedups_list'].append(sched_speedup)
-            nb_datapoints += 1
         
         # Add the function information to the output list
         local_list.append((
             function_name, 
             nb_dropped, 
-            nb_dropped_random_matrix, 
-            nb_dropped_contradicting_tiling_params, 
-            nb_dropped_transformation_list_issue, 
-            nb_pruned, 
-            nb_datapoints, 
             tree_footprint, 
-            local_function_dict))
+            local_function_dict
+        ))
         
     # Write the output representation into pkl files for the parent process to read
     pkl_part_filename = repr_pkl_output_folder + '/pickled_representation_part_'+str(process_id)+'.pkl'
@@ -708,7 +666,6 @@ def get_func_repr_task(input_q, output_q):
 #     max_batch_size: maximum batch size
 #     drop_sched_func: function specifying which schedules in the dataset we want to be dropped if any
 #     drop_prog_func: function specifying which programs in the dataset we want to be dropped if any
-#     can_set_default_eval: function spesifying which points in the dataset can be set to default evaluation TODO add section where this is justified
 #     speedups_clip_func: function spesifying which speedups to clip and to what value
 #     store_device: device where to store the dataset
 #     train_device: device where to train the model
@@ -719,7 +676,6 @@ class Dataset_parallel:
         max_batch_size = 1024,
         drop_sched_func = None,
         drop_prog_func = None,
-        can_set_default_eval = None,
         speedups_clip_func = None,
         no_batching = False,
         store_device = "cpu",
@@ -735,9 +691,6 @@ class Dataset_parallel:
         self.batched_Y = []
         # Number of all the dropped schedules
         self.nb_dropped = 0
-        self.nb_dropped_random_matrix = 0
-        self.nb_dropped_contradicting_tiling_params = 0
-        self.nb_dropped_transformation_list_issue = 0
         
         # Number of dropped schedules due to the drop schedule function only
         self.nb_pruned = 0
@@ -823,11 +776,6 @@ class Dataset_parallel:
 
             def speedups_clip_func(x):
                 return x
-        # If no function to set the default evaluation was specified, define a function that doesn't set the evaluation to a default value for any point
-        if can_set_default_eval == None:
-
-            def can_set_default_eval(x, y):
-                return 0
         # If we don't want to proceed to batching, stop here
         # This is used so that the memory for each process if freed before batching
         # To do that we return after the processes are done writing their pkls, then we call instanciate the class again to read the written pkls
@@ -836,7 +784,7 @@ class Dataset_parallel:
             return
         
         print("Assembling schedules from each function")
-        for function_name, nb_dropped, nb_dropped_random_matrix, nb_dropped_contradicting_tiling_params, nb_dropped_transformation_list_issue, nb_pruned, nb_datapoints, tree_footprint, local_function_dict in processes_output_list:
+        for function_name, nb_dropped, tree_footprint, local_function_dict in processes_output_list:
             for node in local_function_dict['tree']["roots"]:
                 tree_indices_to_device(node, train_device="cpu")
             batches_dict[tree_footprint] = batches_dict.get(
@@ -858,11 +806,6 @@ class Dataset_parallel:
             batches_dict[tree_footprint]['speedups_list'].extend(local_function_dict['speedups_list'])
 
             self.nb_dropped += nb_dropped
-            self.nb_dropped_random_matrix += nb_dropped_random_matrix
-            self.nb_dropped_contradicting_tiling_params += nb_dropped_contradicting_tiling_params
-            self.nb_dropped_transformation_list_issue += nb_dropped_transformation_list_issue
-    
-            self.nb_pruned += nb_pruned
             self.nb_datapoints += len(local_function_dict['speedups_list'])
         # Delete unused variables
         del processes_output_list
@@ -949,13 +892,8 @@ class Dataset_parallel:
         if self.gpu_fitted_batches_index == -1:
             self.gpu_fitted_batches_index = len(self.batched_X)
         
-        print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)}" )
-        print( f"Number of dropped points: {self.nb_dropped}"
-                f"\nNumber of dropped points from RandomMatrix exception: {self.nb_dropped_random_matrix}"
-                f"\nNumber of dropped points from ContradictingTilingParameters exception: {self.nb_dropped_contradicting_tiling_params}"
-                f"\nNumber of dropped points from LinAlgError exception: {self.nb_dropped_transformation_list_issue}"
-                f"\nNumber of dropped points from pruning: {self.nb_pruned}"
-                )
+        print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)} Number of dropped points from each funtion {self.nb_dropped}")
+        
     # Returns batch "index" or range of batches
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -1250,119 +1188,6 @@ def get_scores(df):
     )
     return scores_df
 
-# TODO
-def has_skippable_loop_1comp(
-    prog_dict,
-):
-
-    program_json = prog_dict["program_annotation"]
-    if not len(program_json["computations"]) == 1:
-        return False
-    comp_name = list(program_json["computations"].keys())[0]
-    comp_dict = program_json["computations"][comp_name]
-    write_buffer_id = comp_dict["write_buffer_id"]
-    iterators = comp_dict["iterators"]
-    write_dims = isl_to_write_dims(comp_dict["write_access_relation"])
-    read_buffer_ids = [e["buffer_id"] for e in comp_dict["accesses"]]
-
-    if len(write_dims) == len(iterators):
-
-        if (
-            len(read_buffer_ids) == 1
-            and read_buffer_ids[0] == write_buffer_id
-            and comp_dict["number_of_additions"] == 0
-            and comp_dict["number_of_subtraction"] == 0
-            and comp_dict["number_of_multiplication"] == 0
-            and comp_dict["number_of_division"] == 0
-        ):
-            return True
-        return False
-
-    if not write_buffer_id in read_buffer_ids:
-        return True
-
-    found = False
-    for access in comp_dict["accesses"]:
-        if access["buffer_id"] == write_buffer_id and not access_is_stencil(access):
-            found = True
-            break
-    if not found:
-        if write_dims[-1] != iterators[-1]:
-            return True
-
-    for access in comp_dict["accesses"]:
-        if access["buffer_id"] == write_buffer_id and access_is_stencil(access):
-            return False
-
-    read_dims_bools = []
-    for access in comp_dict["accesses"]:
-        read_dims_bools.append(np.any(access["access_matrix"], axis=0))
-    read_dims_bools = np.any(read_dims_bools, axis=0)
-    read_iterators = [
-        iterators[i]
-        for i, is_used in enumerate(read_dims_bools[:-1])
-        if is_used == True
-    ]
-    used_iterators = set(write_dims + read_iterators)
-    if len(used_iterators) == len(iterators):
-        return False
-
-    if iterators[-1] in used_iterators:
-        if len(comp_dict["accesses"]) > 2:
-            return False
-    return True
-
-
-def sched_is_prunable(program_json, schedule_json):
-    reg = ""
-    comp_names = [
-        n
-        for n in schedule_json.keys()
-        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
-    ]
-    for name in comp_names:
-        innermost_loop = len(program_json["computations"][name]["iterators"])-1
-        reg += f"{{{name}}}:P\(L{innermost_loop}\)U.*|"
-    if(len(comp_names)>0):
-        reg = reg[:-1]
-    
-    schedule_str = get_schedule_str_for_pruning(program_json, schedule_json)
-    if re.search(reg, schedule_str):
-        return True
-    reg = ""
-    
-    for name in comp_names:
-        innermost_loop = len(program_json["computations"][name]["iterators"])-1
-        reg += f"{{{name}}}:P\(L{innermost_loop}\)T2\(L{innermost_loop-2},L{innermost_loop-1}.*|"
-    
-    if(len(comp_names)>0):
-        reg = reg[:-1]
-    if re.search(reg, schedule_str):
-        return True                                                                                                                               
-    return False
-
-def can_set_default_eval(program_json, schedule_json):
-    reg = ""
-    comp_names = [
-        n
-        for n in schedule_json.keys()
-        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
-    ]
-    for name in comp_names:
-        innermost_loop = len(program_json["computations"][name]["iterators"])-1
-        reg += f"{{{name}}}:P\(L{innermost_loop}\)({{|$)|"
-    if(len(comp_names)>0):
-        reg = reg[:-1]
-    
-    schedule_str = get_schedule_str_for_pruning(program_json, schedule_json)
-    if re.search(reg, schedule_str):    
-        return 0.01
-    
-    return 0
-
-def access_is_stencil(access):
-    return np.any(access["access_matrix"], axis=0)[-1]
-
 # Solving the Linear Diophantine equation & finding basic solution (sigma & gamma) for : f_i* sigma - f_j*gamma = 1
 # Used to get skewing parameters
 def linear_diophantine_default(f_i, f_j):
@@ -1410,16 +1235,6 @@ def linear_diophantine_default(f_i, f_j):
             gamma = ((sigma * f_i) - 1) / f_j
     return gamma, sigma
 
-def wrongly_set_to_default_schedule(program_dict, schedule_index):
-    
-    schedule_dict = program_dict["schedules_list"][schedule_index]
-    if len(schedule_dict["execution_times"]) == 1:
-        speed_up = program_dict["initial_execution_time"] / schedule_dict["execution_times"][0]
-        
-        if (speed_up > 0.00099 and speed_up < 0.00101) and (can_set_default_eval(program_dict["program_annotation"], schedule_dict) == 0):
-                return True
-    return False
-
 # Set a lower bound for speedups to avoid fluctuations and make the training easier
 def speedup_clip(speedup):
     if speedup < 0.01:
@@ -1432,11 +1247,6 @@ def drop_program(prog_dict, prog_name):
     if len(prog_dict["schedules_list"]) < 2:
         return True
     
-    if has_skippable_loop_1comp(prog_dict):
-        return True
-        # If we the program is run by lanka24 (because its measurements are inacurate)
-    if ( "node_name" in prog_dict and prog_dict["node_name"] == "lanka24" ):  
-        return True
     return False
 
 # Check if this schedule should be dropped
@@ -1445,13 +1255,7 @@ def drop_schedule(prog_dict, schedule_index):
     # If the execution list is empty or it contains incoherent executions 
     if (not schedule_json["execution_times"]) or min(schedule_json["execution_times"]) < 0: 
         return True
-    # If this schedule should be removed according to the pruning rules
-    if sched_is_prunable(prog_dict["program_annotation"], schedule_json):
-            return True
-    # If the schedule was set to default but it doesn't follow the necessary rule
-    if wrongly_set_to_default_schedule(prog_dict, schedule_index):
-        return True
-
+    
     return False
 
 # Get the involved computations from a specific node 
@@ -1708,108 +1512,6 @@ def get_transformation_matrix(
         matrix = get_trasnformation_matrix_from_vector(transformation, nb_iterators)
         final_transformation = np.matmul(matrix, final_transformation)
     return final_transformation
-
-# TODO
-def get_schedule_str_for_pruning(program_json, sched_json):
-    comp_name = [
-        n
-        for n in sched_json.keys()
-        if not n in ["unfuse_iterators", "tree_structure", "execution_times", "fusions", "sched_str", "legality_check", "exploration_method"]
-    ]
-    sched_str = ""
-    for name in comp_name:
-        # can probably use the feature in prog json
-        transf_loop_nest = program_json["computations"][name]["iterators"].copy()
-        schedule = sched_json[name]
-        if ("fusions" in sched_json and sched_json["fusions"]):
-            for fusion in sched_json["fusions"]:
-                # if this computation was involved in a fusion, we know it uses the same iterators as the computation it was fused with
-                if name in fusion:
-                    iterator_comp_name = fusion[0]
-                    transf_loop_nest = program_json["computations"][iterator_comp_name]["iterators"].copy()
-                    schedule = sched_json[iterator_comp_name]
-        
-        sched_str += '{' + name + '}:'
-        
-        if schedule["parallelized_dim"]:
-            dim_index = transf_loop_nest.index(schedule["parallelized_dim"])
-            sched_str += "P(L" + str(dim_index) + ")"
-
-        if schedule["tiling"]:
-            if schedule["tiling"]["tiling_depth"] == 2:
-                first_dim = schedule["tiling"]["tiling_dims"][0]
-                second_dim = schedule["tiling"]["tiling_dims"][1]
-                
-                first_dim_index = transf_loop_nest.index(first_dim)
-                second_dim_index = transf_loop_nest.index(second_dim)
-                first_factor = schedule["tiling"]["tiling_factors"][0]
-                second_factor = schedule["tiling"]["tiling_factors"][1]
-                sched_str += (
-                    "T2(L"
-                    + str(first_dim_index)
-                    + ",L"
-                    + str(second_dim_index)
-                    + ","
-                    + str(first_factor)
-                    + ","
-                    + str(second_factor)
-                    + ")"
-                )
-                i = transf_loop_nest.index(first_dim)
-                transf_loop_nest[i : i + 1] = first_dim + "_outer", second_dim + "_outer"
-                i = transf_loop_nest.index(second_dim)
-                transf_loop_nest[i : i + 1] = first_dim + "_inner", second_dim + "_inner"
-            else:
-                first_dim = schedule["tiling"]["tiling_dims"][0]
-                second_dim = schedule["tiling"]["tiling_dims"][1]
-                third_dim = schedule["tiling"]["tiling_dims"][2]
-                first_dim_index = transf_loop_nest.index(first_dim)
-                second_dim_index = transf_loop_nest.index(second_dim)
-#                 if (third_dim not in transf_loop_nest):
-#                     print(transf_loop_nest)
-#                     print(sched_json)
-                third_dim_index = transf_loop_nest.index(third_dim)
-                first_factor = schedule["tiling"]["tiling_factors"][0]
-                second_factor = schedule["tiling"]["tiling_factors"][1]
-                third_factor = schedule["tiling"]["tiling_factors"][2]
-                sched_str += (
-                    "T3(L"
-                    + str(first_dim_index)
-                    + ",L"
-                    + str(second_dim_index)
-                    + ",L"
-                    + str(third_dim_index)
-                    + ","
-                    + str(first_factor)
-                    + ","
-                    + str(second_factor)
-                    + ","
-                    + str(third_factor)
-                    + ")"
-                )
-                i = transf_loop_nest.index(first_dim)
-                transf_loop_nest[i : i + 1] = (
-                    first_dim + "_outer",
-                    second_dim + "_outer",
-                    third_dim + "_outer",
-                )
-                i = transf_loop_nest.index(second_dim)
-                transf_loop_nest[i : i + 1] = (
-                    first_dim + "_inner",
-                    second_dim + "_inner",
-                    third_dim + "_inner",
-                )
-                transf_loop_nest.remove(third_dim)
-
-        if schedule["unrolling_factor"]:
-            dim_index = len(transf_loop_nest) - 1
-            dim_name = transf_loop_nest[-1]
-            sched_str += "U(L" + str(dim_index) + "," + schedule["unrolling_factor"] + ")"
-            transf_loop_nest[dim_index : dim_index + 1] = (
-                dim_name + "_Uouter",
-                dim_name + "_Uinner",
-            )
-    return sched_str
 
 # Returns a string representation of a schedule and the transformations applied in it
 def get_schedule_str(program_json, sched_json):

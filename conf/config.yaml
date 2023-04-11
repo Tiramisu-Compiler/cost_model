@@ -1,40 +1,41 @@
-experiment: # Name of the expirement 
-    name: "experiment_name" # This will be used to save the best model weights
-    base_path: "/absolute/path/to/the/model/code" 
+experiment:
+    name: "Baseline"
+    base_path: "/data/kb4083/cost_model"
 
 data_generation:
-    train_dataset_file: "/path/to/the/training/dataset"  # training / validation set
-    valid_dataset_file: "/path/to/the/validation/dataset"
-    benchmark_dataset_file: "/path/to/the/benchmarks/dataset"
-    batch_size: 2048
-    nb_processes: 4 # Number of processes to use when loading the data in parallel
-
-
+    train_dataset_file: "/data/kb4083/datasets/new_cleaned_data/dataset_expr_batch101-152504_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/new_cleaned_data/dataset_expr_batch101-152504_val.pkl"
+    benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
+    dataset_name:  "dataset_new_data"
+    batch_size: 1024
+    nb_processes: 50
 
 training: 
     log_file: "logs.txt" # Just the name
-    lr: 0.001
-    max_epochs: 1000 
-    gpu: "cuda:x" # GPU to train on. Example: cuda:2
-    continue_training: False # Continue training from saved model checkpoint
-    model_weights_path: "/path/to/model/weights" # Model weights to use for finetuning
+    lr: 0.1
+    max_epochs: 500
+    train_gpu: [ "cuda:7", "cuda:3"]
+    valid_gpu: ["cpu"]
+    continue_training: False
+    model_weights_path: "/data/kb4083/cost_model/best_model_Baseline_79d.pt"
 
 testing:
-    testing_model_weights_path: "/path/to/model/weights" # Model weights to evaluate
-    gpu: "cuda:x" # GPU to validate on
+    testing_model_weights_path: "/data/kb4083/cost_model/best_model_Baseline_176b.pt" # Model weights to evaluate
+    gpu: "cuda:2" # GPU to validate on
+    
 
-wandb: 
-    use_wandb: False # Track model progress using the Weights & Biases platform
-    project: "release_model" # Name of the project to add this expirement to
+wandb:
+    use_wandb: False
+    project: "release_model"
     
 model: 
-    input_size: 846 # Size of the input. Here we specify the size of the computation vector.
-    comp_embed_layer_sizes: 
+    input_size: 846
+    comp_embed_layer_sizes:
         - 600
         - 350
         - 200
         - 180
-    drops: # Dropout layers probabilities
+    drops:
         - 0.050
         - 0.050
         - 0.050

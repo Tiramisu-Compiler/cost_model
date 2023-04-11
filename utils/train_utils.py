@@ -24,8 +24,8 @@ def train_model(
     num_epochs=100,
     log_every=5,
     logger=None,
-    train_device="cpu",
-    validation_device="cpu",
+    train_devices = ["cpu"],
+    validation_devices = ["cpu"],
 ):
     since = time.time()
     losses = []
@@ -36,70 +36,76 @@ def train_model(
     dataloader_size = {"train": 0, "val": 0}
     
     # Calculate data size for each dataset. Used to caluclate the loss duriing the training  
-    for item in dataloader["train"]:
-        label = item[1]
-        dataloader_size["train"] += label.shape[0]
-    for item in dataloader["val"]:
-        label = item[1]
-        dataloader_size["val"] += label.shape[0]
-    
-    # Use the 1cycle learning rate policy
-    scheduler = OneCycleLR(
-        optimizer,
-        max_lr=max_lr,
-        steps_per_epoch=len(dataloader["train"]),
-        epochs=num_epochs,
-    )
-    
+    for device in dataloader["train"]:
+        for item in dataloader["train"][device]:
+            label = item[1]
+            dataloader_size["train"] += label.shape[0]
+    for device in dataloader["val"]:
+        for item in dataloader["val"][device]:
+            label = item[1]
+            dataloader_size["val"] += label.shape[0]
+            
     for epoch in range(num_epochs):
         epoch_start = time.time()
         for phase in ["train", "val"]:
             if phase == "train":
                 # Enable gradient tracking for training
                 model.train()
-                device = train_device
             else:
                 # Disable gradient tracking for evaluation
                 model.eval()
-                # If the user wants to run the validation on another GPU
-                if (validation_device != "cpu"):
-                    device = validation_device
-            # Send model to the training device
-            model = model.to(device)
-            model.device = device
-            
-            running_loss = 0.0
-            pbar = tqdm(dataloader[phase])
-            
-            # For each batch in the dataset
-            for inputs, labels in pbar:
-                # Send the labels and inputs to the training device
-                original_device = labels.device
-                inputs = (
-                    inputs[0],
-                    inputs[1].to(device),
-                    inputs[2].to(device),
-                    inputs[3].to(device),
-                    inputs[4].to(device),
-                    inputs[5].to(device),
-                )
-                labels = labels.to(device)
-                
-                # Reset the gradients for all tensors
-                optimizer.zero_grad()
 
-                with torch.set_grad_enabled(phase == "train"):
-                    # Get the model predictions
-                    outputs = model(inputs)
-                    assert outputs.shape == labels.shape
-                    
-                    # Calculate the loss
-                    loss = criterion(outputs, labels)
-                    
-                    if phase == "train":
-                        # Backpropagation
-                        loss.backward()
-                        optimizer.step()
+            running_loss = 0.0
+            for device in dataloader[phase]:
+                pbar = tqdm(dataloader[phase][device])
+                # Send model to the training device
+                model = model.to(device)
+                model.device = device
+                
+                # Need to recreate the optimizer everytime we change the device we'll be training on because:
+                # "In general, you should make sure that optimized parameters live in consistent locations when optimizers are constructed and used."
+                # Check the TORCH.OPTIM pytorch documentation for more informations
+                optimizer = torch.optim.AdamW(
+                    model.parameters(), lr=max_lr, weight_decay=0.15e-1
+                )
+                # Use the 1cycle learning rate policy
+                scheduler = OneCycleLR(
+                    optimizer,
+                    max_lr=max_lr,
+                    steps_per_epoch=len(dataloader["train"]),
+                    epochs=num_epochs,
+                )
+                
+                # For each batch in the dataset
+                for inputs, labels in pbar:
+                    # Send the labels and inputs to the training device
+                    original_device = labels.device
+                    inputs = (
+                        inputs[0],
+                        inputs[1].to(device),
+                        inputs[2].to(device),
+                        inputs[3].to(device),
+                        inputs[4].to(device),
+                        inputs[5].to(device),
+                    )
+                    labels = labels.to(device)
+
+                    # Reset the gradients for all tensors
+                    optimizer.zero_grad()
+
+                    with torch.set_grad_enabled(phase == "train"):
+                        # Get the model predictions
+                        outputs = model(inputs)
+                        assert outputs.shape == labels.shape
+
+                        # Calculate the loss
+                        loss = criterion(outputs, labels)
+
+                        if phase == "train":
+                            # Backpropagation
+                            loss.backward()
+                            optimizer.step()
+                            scheduler.step()
                 pbar.set_description("Loss: {:.3f}".format(loss.item()))
                 running_loss += loss.item() * labels.shape[0]
                 # Send the labels back to the original device 
@@ -167,7 +173,6 @@ def train_model(
                     )
             else:
                 train_loss = epoch_loss
-                scheduler.step()
     time_elapsed = time.time() - since
 
     print(
@@ -182,5 +187,4 @@ def train_model(
             time_elapsed // 60, time_elapsed % 60, best_loss
         )
     )
-
     return losses, best_model

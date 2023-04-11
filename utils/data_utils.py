@@ -43,7 +43,7 @@ MAX_DEPTH = 5
 MAX_EXPR_LEN = 62
 
 # Creates a template for the input representation
-def get_representation_template(program_dict, train_device="cpu"):
+def get_representation_template(program_dict):
     # Set the max and min number of accesses allowed 
     max_accesses = 15
     min_accesses = 0
@@ -209,7 +209,7 @@ def get_representation_template(program_dict, train_device="cpu"):
     tree_annotation = copy.deepcopy(orig_tree_structure)
     
     # Add necessary attributes to the tree_structure
-    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict, train_device="cpu")
+    prog_tree = update_tree_atributes(tree_annotation, loops_indices_dict, comps_indices_dict)
     
     return (
         prog_tree,
@@ -221,27 +221,25 @@ def get_representation_template(program_dict, train_device="cpu"):
 
 # Change the structure of the tree annotations to contain a uinque index for each loop and a has_comps boolean
 # This is used to prepare for the recusive embedding of the program during the training
-def update_tree_atributes(node, loops_indices_dict, comps_indices_dict, train_device="cpu"):
+def update_tree_atributes(node, loops_indices_dict, comps_indices_dict):
         if "roots" in node :
             for root in node["roots"]:
-                update_tree_atributes(root, loops_indices_dict, comps_indices_dict, train_device=train_device)
+                update_tree_atributes(root, loops_indices_dict, comps_indices_dict)
             return node
 
-        node["loop_index"] = torch.tensor(loops_indices_dict[node["loop_name"]]).to(
-            train_device
-        )
+        node["loop_index"] = torch.tensor(loops_indices_dict[node["loop_name"]])
         if node["computations_list"] != []:
             node["computations_indices"] = torch.tensor(
                 [
                     comps_indices_dict[comp_name]
                     for comp_name in node["computations_list"]
                 ]
-            ).to(train_device)
+            )
             node["has_comps"] = True
         else:
             node["has_comps"] = False
         for child_node in node["child_list"]:
-            update_tree_atributes(child_node, loops_indices_dict, comps_indices_dict, train_device=train_device)
+            update_tree_atributes(child_node, loops_indices_dict, comps_indices_dict)
         return node
 
     
@@ -543,7 +541,7 @@ def get_schedule_representation(
 # Get the representation of a specific set of functions and write it to a pkl file for the parent process to read
 def get_func_repr_task(input_q, output_q):
     # Recieve functions to work on from parent process
-    process_id, programs_dict, repr_pkl_output_folder, train_device = input_q.get()
+    process_id, programs_dict, repr_pkl_output_folder = input_q.get()
     function_name_list = list(programs_dict.keys())
     dropped_funcs = []
     local_list = []
@@ -567,8 +565,7 @@ def get_func_repr_task(input_q, output_q):
                 comps_placeholders_indices_dict,
                 loops_placeholders_indices_dict
             ) = get_representation_template(
-                programs_dict[function_name],
-                train_device=train_device,
+                programs_dict[function_name]
             )
         
         except (LoopsDepthException, NbAccessException):
@@ -677,8 +674,7 @@ class Dataset_parallel:
         drop_prog_func = None,
         speedups_clip_func = None,
         no_batching = False,
-        store_device = "cpu",
-        train_device = "cpu",
+        store_devices = ["cpu"],
         repr_pkl_output_folder = "none",
         just_load_pickled_repr = False,
         nb_processes = 15
@@ -700,7 +696,7 @@ class Dataset_parallel:
         # Number of loaded datapoints
         self.nb_datapoints = 0
         # number of batches that can fit in the GPU
-        self.gpu_fitted_batches_index = -1
+        self.device_batches_indices_dict = {}
         processes_output_list = []
         programs_dict = {}
         batches_dict = dict()
@@ -745,8 +741,8 @@ class Dataset_parallel:
             print("number of functions per process: ",nb_funcs_per_process)
 
             for i in range(nb_processes):
-                process_programs_dict=dict(list(programs_dict.items())[i*nb_funcs_per_process:(i+1)*nb_funcs_per_process])
-                input_queue.put((i, process_programs_dict, repr_pkl_output_folder, store_device))
+                process_programs_dict = dict(list(programs_dict.items())[i*nb_funcs_per_process:(i+1)*nb_funcs_per_process])
+                input_queue.put((i, process_programs_dict, repr_pkl_output_folder))
                 
             
             for i in range(nb_processes):
@@ -812,7 +808,8 @@ class Dataset_parallel:
         gc.collect()
         
         print("Batching data")
-        storing_device = torch.device(store_device)
+        device_index = 0
+        storing_device = torch.device(store_devices[device_index])
         # For each tree footprint in the dataset
         # A footprint represents the structure of each function. We batch functions according to their tree footprint so that the forward pass to the model can be correctly executed
         for tree_footprint in tqdm(batches_dict):
@@ -835,14 +832,26 @@ class Dataset_parallel:
                 batches_dict[tree_footprint]["loops_tensor_list"],
                 batches_dict[tree_footprint]["speedups_list"],
             ) = zip(*zipped)
-                
+            
+            last_batch_index = 0
+            
             # Split the data into batches of size max_batch_size
-            for chunk in range( 0, len(batches_dict[tree_footprint]["speedups_list"]), max_batch_size, ):
+            for chunk in range( 0, len(batches_dict[tree_footprint]["speedups_list"]), max_batch_size,):
                 # Check GPU memory in order to avoid out of memory error
-                if storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.83:
-                    print( "GPU memory on " + str(storing_device) + " nearly full, switching to CPU memory" )
-                    self.gpu_fitted_batches_index = len(self.batched_X)
-                    storing_device = torch.device("cpu")
+                if storing_device.type == "cuda" and ( torch.cuda.memory_allocated(storing_device.index) / torch.cuda.get_device_properties(storing_device.index).total_memory )> 0.9:
+                    print(f"GPU memory on {str(storing_device)} nearly full")
+                    # Check if the user has specified multiple GPUs
+                    if device_index < len(store_devices) :
+                        # This batches for this device start from the end of the previous device if available, 0 otherwise. 
+                        starting_index = self.device_batches_indices_dict[store_devices[device_index-1]][1] if device_index > 0 else 0
+                        ending_index = len(self.batched_X)
+                        last_batch_index = ending_index
+                        # Add the indices mapping to the dictionary
+                        self.device_batches_indices_dict[store_devices] = (starting_index, ending_index)
+                        # Move to the next device
+                        device_index += 1
+                        storing_device = torch.device(store_devices[device_index]) if device_index < len(store_devices) else torch.device("cpu")
+                        print(f"GPU memory on {str(storing_device)} nearly full. Switching to device number {device_index}: {storing_device}")
                 
                 self.batched_datapoint_attributes.append(
                     batches_dict[tree_footprint]["datapoint_attributes_list"][
@@ -887,9 +896,9 @@ class Dataset_parallel:
         del batches_dict
         gc.collect()
         
-        # Save the size of data that can fit into the GPU. Will be used later when loading the data
-        if self.gpu_fitted_batches_index == -1:
-            self.gpu_fitted_batches_index = len(self.batched_X)
+        # If we haven't already saved the end of the dataset in a device
+        if storing_device not in self.device_batches_indices_dict.keys():
+            self.device_batches_indices_dict[storing_device] = (last_batch_index, len(self.batched_X))
         
         print( f"Number of datapoints {self.nb_datapoints} Number of batches {len(self.batched_Y)} Number of dropped points from each funtion {self.nb_dropped}")
         
@@ -906,22 +915,21 @@ class Dataset_parallel:
         return len(self.batched_Y)    
 
 # Function to read the pkls written by the load_data_into_pkls_parallel function, batch the loaded data and return the batched data to be saved
-def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_device="cpu", train_device="cpu"):
+def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_devices=["cpu"]):
     dataset = Dataset_parallel(
         None, 
         max_batch_size, 
         None, 
         repr_pkl_output_folder=repr_pkl_output_folder, 
         just_load_pickled_repr=True, 
-        store_device=store_device, 
-        train_device=train_device)
+        store_devices=store_devices)
     
     indices = list(range(len(dataset)))
     batches_list = []
     for i in indices:
         batches_list.append(dataset[i])
 
-    return dataset, batches_list, indices, dataset.gpu_fitted_batches_index         
+    return dataset, batches_list, indices, dataset.device_batches_indices_dict         
 
 # Function to write the representation of the dataset into pkl files. This is done in parallel using the multiprocessing module 
 def load_data_into_pkls_parallel(train_val_dataset_file, nb_processes=15, repr_pkl_output_folder=None, overwrite_existing_pkl=False):
@@ -941,8 +949,7 @@ def load_data_into_pkls_parallel(train_val_dataset_file, nb_processes=15, repr_p
         just_load_pickled_repr=False,
         nb_processes=nb_processes, 
         repr_pkl_output_folder=repr_pkl_output_folder, 
-        store_device="cpu", 
-        train_device="cpu"
+        store_devices=["cpu"]
     )         
     return  
 

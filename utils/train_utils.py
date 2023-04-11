@@ -25,6 +25,7 @@ def train_model(
     log_every=5,
     logger=None,
     train_device="cpu",
+    validation_device="cpu",
 ):
     since = time.time()
     losses = []
@@ -42,9 +43,6 @@ def train_model(
         label = item[1]
         dataloader_size["val"] += label.shape[0]
     
-    # Send model to the training device
-    model = model.to(train_device)
-    
     # Use the 1cycle learning rate policy
     scheduler = OneCycleLR(
         optimizer,
@@ -52,15 +50,24 @@ def train_model(
         steps_per_epoch=len(dataloader["train"]),
         epochs=num_epochs,
     )
+    
     for epoch in range(num_epochs):
         epoch_start = time.time()
         for phase in ["train", "val"]:
             if phase == "train":
                 # Enable gradient tracking for training
                 model.train()
+                device = train_device
             else:
                 # Disable gradient tracking for evaluation
                 model.eval()
+                # If the user wants to run the validation on another GPU
+                if (validation_device != "cpu"):
+                    device = validation_device
+            # Send model to the training device
+            model = model.to(device)
+            model.device = device
+            
             running_loss = 0.0
             pbar = tqdm(dataloader[phase])
             
@@ -70,13 +77,13 @@ def train_model(
                 original_device = labels.device
                 inputs = (
                     inputs[0],
-                    inputs[1].to(train_device),
-                    inputs[2].to(train_device),
-                    inputs[3].to(train_device),
-                    inputs[4].to(train_device),
-                    inputs[5].to(train_device),
+                    inputs[1].to(device),
+                    inputs[2].to(device),
+                    inputs[3].to(device),
+                    inputs[4].to(device),
+                    inputs[5].to(device),
                 )
-                labels = labels.to(train_device)
+                labels = labels.to(device)
                 
                 # Reset the gradients for all tensors
                 optimizer.zero_grad()

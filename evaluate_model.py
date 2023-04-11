@@ -13,7 +13,7 @@ def define_and_load_model(conf):
         comp_embed_layer_sizes=list(conf.model.comp_embed_layer_sizes),
         drops=list(conf.model.drops),
         loops_tensor_size=8,
-        train_device=conf.testing.gpu,
+        device=conf.testing.gpu,
     )
     # Load the trained model weights
     model.load_state_dict(

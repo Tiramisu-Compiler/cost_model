@@ -3,7 +3,6 @@ import io
 import logging
 import gc
 import hydra
-
 from hydra.core.config_store import ConfigStore
 from utils.data_utils import *
 from utils.modeling import *
@@ -22,8 +21,8 @@ def main(conf):
                         level = logging.DEBUG,
                         format = '%(asctime)s:%(levelname)s:  %(message)s')
     logging.info(f"Starting experiment {conf.experiment.name}")
-    train_device = torch.device(conf.training.gpu)
-    
+    train_device = torch.device(conf.training.training_gpu)
+    validation_device = torch.device(conf.training.validation_gpu)
     # Defining the model
     logging.info("Defining the model")
     model = Model_Recursive_LSTM_v2(
@@ -31,7 +30,7 @@ def main(conf):
         comp_embed_layer_sizes=list(conf.model.comp_embed_layer_sizes),
         drops=list(conf.model.drops),
         loops_tensor_size=8,
-        train_device=conf.training.gpu,
+        device=conf.training.training_gpu,
     )
     
     # Load model weights and continue training if specified  
@@ -47,7 +46,8 @@ def main(conf):
     logging.info("Reading the dataset")
     train_bl_1 = []
     train_bl_2 = []
-    val_bl = []
+    val_bl_1 = []
+    val_bl_2 = []
     
     # Training
     train_file_path = os.path.join( conf.experiment.base_path, "batched/train/", f"{Path(conf.data_generation.train_dataset_file).parts[-1][:-4]}_CPU.pt")
@@ -67,11 +67,21 @@ def main(conf):
     
     # Validation
     validation_file_path = os.path.join( conf.experiment.base_path, "batched/valid/", f"{Path(conf.data_generation.valid_dataset_file).parts[-1][:-4]}.pt")
-    print(f"Loading Validation set {validation_file_path} into the CPU")
+    
+    validation_file_path = os.path.join( conf.experiment.base_path, "batched/valid/", f"{Path(conf.data_generation.valid_dataset_file).parts[-1][:-4]}_CPU.pt")
+    if os.path.exists(validation_file_path):
+        print(f"Loading second part of the validation set {validation_file_path} into the CPU")
+        with open(validation_file_path, "rb") as file:
+            val_bl_2 = torch.load(validation_file_path, map_location="cpu")
+            
+    validation_file_path = os.path.join(conf.experiment.base_path, "batched/valid/", f"{Path(conf.data_generation.valid_dataset_file).parts[-1][:-4]}_GPU.pt")
+    
+    print(f"Loading first part of the validation set {validation_file_path} into device: {validation_device}")
     with open(validation_file_path, "rb") as file:
-        val_bl = torch.load(validation_file_path, map_location='cpu')
+        val_bl_1 = torch.load(validation_file_path, map_location=validation_device)
     
-    
+    # Fuse loaded training batches
+    val_bl = val_bl_1 + val_bl_2 if len(val_bl_2) > 0 else val_bl_1
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(
@@ -97,7 +107,8 @@ def main(conf):
         num_epochs=conf.training.max_epochs,
         logger=logger,
         log_every=1,
-        train_device=conf.training.gpu,
+        train_device=conf.training.training_gpu,
+        validation_device=conf.training.validation_gpu,
     )
 
 

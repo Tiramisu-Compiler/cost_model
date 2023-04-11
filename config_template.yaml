@@ -1,0 +1,45 @@
+experiment: # Name of the expirement 
+    name: "experiment_name" # This will be used to save the best model weights
+    base_path: "/absolute/path/to/the/model/code" 
+
+data_generation:
+    train_dataset_file: "/path/to/the/training/dataset"  # training / validation set
+    valid_dataset_file: "/path/to/the/validation/dataset"
+    benchmark_dataset_file: "/path/to/the/benchmarks/dataset"
+    batch_size: 2048
+    nb_processes: 4 # Number of processes to use when loading the data in parallel
+
+
+
+training: 
+    log_file: "logs.txt" # Just the name
+    lr: 0.001
+    max_epochs: 1000 
+    gpu: "cuda:x" # GPU to train on. Example: cuda:2
+    continue_training: False # Continue training from saved model checkpoint
+    model_weights_path: "/path/to/model/weights" # Model weights to use for finetuning
+
+testing:
+    testing_model_weights_path: "/path/to/model/weights" # Model weights to evaluate
+    gpu: "cuda:x" # GPU to validate on
+
+wandb: 
+    use_wandb: False # Track model progress using the Weights & Biases platform
+    project: "release_model" # Name of the project to add this expirement to
+    
+model: 
+    input_size: 846 # Size of the input. Here we specify the size of the computation vector.
+    comp_embed_layer_sizes: 
+        - 600
+        - 350
+        - 200
+        - 180
+    drops: # Dropout layers probabilities
+        - 0.050
+        - 0.050
+        - 0.050
+        - 0.050
+        - 0.050
+
+defaults:
+  - override hydra/job_logging: disabled

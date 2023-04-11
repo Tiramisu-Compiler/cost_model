@@ -1383,6 +1383,18 @@ def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name):
     )
     return result
 
+# Returns the shift of the loop in the non-rectangular case or the bound itself if the bound is an integer
+def extract_shift_from_bound(bound):
+    if is_int(bound):
+        return int(bound)
+    if "+" not in bound and "-" not in bound:
+        return 0
+    
+    if "+" in bound:
+        return int(bound[bound.find("+")+1:])
+    if "-" in bound:
+        return -int(bound[bound.find("-")+1:])
+    
 # Returns a vector that represents the right hand sise of teh constraint matrix inequalities
 # (The vector b from the previous example)
 def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name):
@@ -1392,13 +1404,26 @@ def get_padded_second_side_of_the_constraint_equations_original(program_json, sc
         if(is_int(program_json["iterators"][it]["lower_bound"])):
             result.append(int(program_json["iterators"][it]["lower_bound"]))
         else:
+#             shift = extract_shift_from_bound(program_json["iterators"][it]["lower_bound"])
             result.append(0)
         if(is_int(program_json["iterators"][it]["upper_bound"])):
             result.append(int(program_json["iterators"][it]["upper_bound"]))
         else:
+#             shift = extract_shift_from_bound(program_json["iterators"][it]["upper_bound"])
             result.append(0)
     result = result + [0]*(MAX_DEPTH*2-len(result))
     return result
+
+# In the case where the bound is shifted, remove the shift and return the iterator only
+# Example: bound: i + 1 the function return i
+def remove_shift_from_bound(bound):
+    # If the bound is an integer or it doesn't have a shift there is nothing to be done
+    if is_int(bound) or ("+" not in bound and "-" not in bound):
+        return bound
+    if "+" in bound:
+        return bound[:bound.find("+")]
+    if "-" in bound:
+        return bound[:bound.find("-")]
 
 # Get the matrix describing the iteration domain after applying a sequence of affine transformations
 # The transformed constraint matrix is: the original constraint matrix multiplied by the inverse of the transformation matrix

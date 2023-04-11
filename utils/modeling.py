@@ -14,12 +14,12 @@ class Model_Recursive_LSTM_v2(nn.Module):
         lstm_embedding_size=100,
         expr_embed_size=100,
         loops_tensor_size=8,
-        train_device="cpu",
+        device="cpu",
         num_layers=1,
         bidirectional=True,
     ):
         super().__init__()
-        self.train_device = train_device
+        self.device = device
         embedding_size = comp_embed_layer_sizes[-1]
         
         regression_layer_sizes = [embedding_size] + comp_embed_layer_sizes[-2:]
@@ -136,7 +136,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
             selected_comps_tensor = torch.index_select(
                 comps_embeddings, 
                 1, 
-                node["computations_indices"].to(self.train_device)
+                node["computations_indices"].to(self.device)
             )
             lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
                 selected_comps_tensor
@@ -153,7 +153,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         selected_loop_tensor = torch.index_select(
             loops_tensor, 
             1, 
-            node["loop_index"].to(self.train_device)
+            node["loop_index"].to(self.device)
         )
         # Concatinate the loop vector, computations embedding and nodes (child loops) embedding
         x = torch.cat((nodes_h_n, comps_h_n, selected_loop_tensor), 2)
@@ -181,9 +181,9 @@ class Model_Recursive_LSTM_v2(nn.Module):
         # Embed all the computations in the tree
         batch_size, num_comps, __dict__ = comps_tensor_first_part.shape
         
-        first_part = comps_tensor_first_part.to(self.train_device).view(batch_size * num_comps, -1)
-        vectors = comps_tensor_vectors.to(self.train_device) # No need to reshape this tensor since we transformed it when loading the data
-        third_part = comps_tensor_third_part.to(self.train_device).view(batch_size * num_comps, -1)
+        first_part = comps_tensor_first_part.to(self.device).view(batch_size * num_comps, -1)
+        vectors = comps_tensor_vectors.to(self.device) # No need to reshape this tensor since we transformed it when loading the data
+        third_part = comps_tensor_third_part.to(self.device).view(batch_size * num_comps, -1)
         
         # Pass the transformation vectors through the vector encoding LSTM
         vectors = self.encode_vectors(vectors)

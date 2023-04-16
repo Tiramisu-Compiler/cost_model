@@ -8,10 +8,27 @@ import wandb
 from torch.optim.lr_scheduler import OneCycleLR
 from tqdm import tqdm
 
+import torch
+import torch.nn.functional as F
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed import init_process_group, destroy_process_group
+import os
 # Calculate the mean absolute percentage error
 def mape_criterion(inputs, targets):
     eps = 1e-5
     return 100 * torch.mean(torch.abs(targets - inputs) / (targets + eps))
+
+def ddp_setup(rank: int, world_size: int):
+  """
+  Args:
+      rank: Unique identifier of each process
+     world_size: Total number of processes
+  """
+  os.environ["MASTER_ADDR"] = "localhost"
+  os.environ["MASTER_PORT"] = "12355"
+  init_process_group(backend="nccl", rank=rank, world_size=world_size)
 
 
 def train_model(
@@ -21,12 +38,13 @@ def train_model(
     optimizer,
     max_lr,
     dataloader,
-    num_epochs=100,
-    log_every=5,
-    logger=None,
-    train_device="cpu",
-    validation_device="cpu",
+    num_epochs,
+    log_every,
+    logger,
+    train_device,
+    validation_device,
 ):
+
     since = time.time()
     losses = []
     train_loss = 0
@@ -34,7 +52,6 @@ def train_model(
     best_model = None
     hash = random.getrandbits(16)
     dataloader_size = {"train": 0, "val": 0}
-    
     # Calculate data size for each dataset. Used to caluclate the loss duriing the training  
     for item in dataloader["train"]:
         label = item[1]
@@ -44,12 +61,12 @@ def train_model(
         dataloader_size["val"] += label.shape[0]
     
     # Use the 1cycle learning rate policy
-    scheduler = OneCycleLR(
-        optimizer,
-        max_lr=max_lr,
-        steps_per_epoch=len(dataloader["train"]),
-        epochs=num_epochs,
-    )
+#     scheduler = OneCycleLR(
+#         optimizer,
+#         max_lr=max_lr,
+#         steps_per_epoch=len(dataloader["train"]),
+#         epochs=num_epochs,
+#     )
     
     for epoch in range(num_epochs):
         epoch_start = time.time()
@@ -100,6 +117,7 @@ def train_model(
                         # Backpropagation
                         loss.backward()
                         optimizer.step()
+#                         scheduler.step()
                 pbar.set_description("Loss: {:.3f}".format(loss.item()))
                 running_loss += loss.item() * labels.shape[0]
                 # Send the labels back to the original device 
@@ -167,7 +185,6 @@ def train_model(
                     )
             else:
                 train_loss = epoch_loss
-                scheduler.step()
     time_elapsed = time.time() - since
 
     print(
@@ -182,5 +199,5 @@ def train_model(
             time_elapsed // 60, time_elapsed % 60, best_loss
         )
     )
-
+    destroy_process_group()
     return losses, best_model

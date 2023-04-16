@@ -77,7 +77,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         
         nn.init.xavier_uniform_(self.predict.weight)
         self.ELU = nn.ELU()
-        self.LeakyReLU = nn.LeakyReLU(0.1)
+        self.LeakyReLU = nn.LeakyReLU(0.01)
         # Initialize a tensor to represent the absence of computations at a level in the program tree
         self.no_comps_tensor = nn.Parameter(
             nn.init.xavier_uniform_(torch.zeros(1, embedding_size))

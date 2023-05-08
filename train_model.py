@@ -36,7 +36,7 @@ def main(conf):
         input_size=conf.model.input_size,
         comp_embed_layer_sizes=list(conf.model.comp_embed_layer_sizes),
         drops=list(conf.model.drops),
-        loops_tensor_size=8,
+        loops_tensor_size=2,
         device=train_device,
     )
     
@@ -67,7 +67,7 @@ def main(conf):
     
     print(f"Loading first part of the training set {train_file_path} into device number : {conf.training.training_gpu}")
     with open(train_file_path, "rb") as file:
-        train_bl_1 = torch.load(train_file_path, map_location=train_device)
+        train_bl_1 = torch.load(train_file_path, map_location="cuda:0")
     
     # Fuse loaded training batches
     train_bl = train_bl_1 + train_bl_2 if len(train_bl_2) > 0 else train_bl_1
@@ -85,12 +85,12 @@ def main(conf):
     
     print(f"Loading first part of the validation set {validation_file_path} into device: {conf.training.validation_gpu}")
     with open(validation_file_path, "rb") as file:
-        val_bl_1 = torch.load(validation_file_path, map_location=validation_device)
+        val_bl_1 = torch.load(validation_file_path, map_location="cpu")
     
     # Fuse loaded training batches
     val_bl = val_bl_1 + val_bl_2 if len(val_bl_2) > 0 else val_bl_1
     # Defining training params
-    criterion = mape_criterion
+    criterion = total_loss
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=conf.training.lr, weight_decay=0.15e-1
     )
@@ -115,8 +115,8 @@ def main(conf):
         num_epochs=conf.training.max_epochs,
         logger=logger,
         log_every=1,
-        train_device=train_device,
-        validation_device=conf.training.validation_gpu,
+        train_device="cuda:0",
+        validation_device="cpu",
     )
 
 

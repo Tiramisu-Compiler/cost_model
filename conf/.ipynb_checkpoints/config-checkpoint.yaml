@@ -1,37 +1,35 @@
 experiment:
-    name: "data_scalability_20m"
-    base_path: "/data/kb4083/cost_model"
+    name: "Code2sched_PTU_modified_output_loss_no_softmax_div_4_20000"
+    base_path: "/data/kb4083/cost_model_code2sched"
 
-# /data/kb4083/datasets/sample_20m_test.pkl
-# /data/mm12191/datasets/dataset_batch550000-838143_train.pkl
-# /data/mm12191/datasets/benchmarks_mats1.pkl
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/data_scalability/20/dataset_expr_batch550000-838143_sample_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_reformed_IPTU_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_reformed_IPTU_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
-    dataset_name:  "dataset_scalability"
+    dataset_name:  "dataset_new_data"
     batch_size: 1024
-    nb_processes: 170
-
+    nb_processes: 20
 
 training: 
     log_file: "logs.txt" # Just the name
-    lr: 0.001
-    max_epochs: 2000
-    gpu: "cuda:4"
+    lr: 0.0001
+    max_epochs: 20000
+    training_gpu: "2"
+    validation_gpu: "cpu"
+    continue_training: False
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_b14a.pt"
 
 testing:
-    datasets: # choose from valid, bench.
-        # - valid
-        - bench
-    checkpoint: "best_model_ACTUAL_20m_2000_scalability_experiment.pt"
+    testing_model_weights_path: "/data/kb4083/cost_model/best_model_Baseline_176b.pt" # Model weights to evaluate
+    gpu: "cuda:2" # GPU to validate on
+    
 
 wandb:
-    use_wandb: True
-    project: "release_model"
+    use_wandb: False
+    project: "Code2sched"
     
 model: 
-    input_size: 846
+    input_size: 714
     comp_embed_layer_sizes:
         - 600
         - 350

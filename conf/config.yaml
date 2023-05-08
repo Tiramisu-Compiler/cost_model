@@ -1,20 +1,20 @@
 experiment:
-    name: "Baseline_data_no_one_cycle000001"
-    base_path: "/data/kb4083/cost_model"
+    name: "Code2sched_PTU_modified_output_loss_no_softmax_div_4_20000"
+    base_path: "/data/kb4083/cost_model_code2sched"
 
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_reformed_IPTU_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_reformed_IPTU_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "dataset_new_data"
     batch_size: 1024
-    nb_processes: 200
+    nb_processes: 20
 
 training: 
     log_file: "logs.txt" # Just the name
-    lr: 0.00001
-    max_epochs: 500
-    training_gpu: "3"
+    lr: 0.0001
+    max_epochs: 20000
+    training_gpu: "2"
     validation_gpu: "cpu"
     continue_training: False
     model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_b14a.pt"
@@ -25,11 +25,11 @@ testing:
     
 
 wandb:
-    use_wandb: True
-    project: "release_model"
+    use_wandb: False
+    project: "Code2sched"
     
 model: 
-    input_size: 846
+    input_size: 714
     comp_embed_layer_sizes:
         - 600
         - 350

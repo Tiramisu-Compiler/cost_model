@@ -14,6 +14,10 @@ def generate_datasets(conf):
     Args:
         conf (RecursiveLSTMConfig): The configuration of the repository.
     """
+    os.environ["CUDA_VISIBLE_DEVICES"] = [
+        conf.training.training_gpu,
+        conf.training.validation_gpu
+    ] if conf.training.validation_gpu != "cpu" else conf.training.training_gpu
     # Validation
     val_repr_pkl_output_folder = os.path.join(
         conf.experiment.base_path, 
@@ -33,8 +37,8 @@ def generate_datasets(conf):
     val_ds, val_bl, val_indices, gpu_fitted_batches_index = load_pickled_repr(
         val_repr_pkl_output_folder,
         max_batch_size = conf.data_generation.batch_size,
-        store_device = conf.training.validation_gpu,
-        train_device = conf.training.validation_gpu
+        store_device = "cpu",
+        train_device = "cpu"
     )
     
     # Split the training data into two parts such that the first part fits directly into the GPU
@@ -78,7 +82,7 @@ def generate_datasets(conf):
     del val_ds, val_bl, val_indices
     gc.collect()
     
-    #Training
+#     #Training
     train_repr_pkl_output_folder = os.path.join(
         conf.experiment.base_path,
         'pickled/pickled_'
@@ -97,8 +101,8 @@ def generate_datasets(conf):
     train_ds, train_bl, train_indices, gpu_fitted_batches_index = load_pickled_repr(
         train_repr_pkl_output_folder,
         max_batch_size = conf.data_generation.batch_size,
-        store_device = conf.training.training_gpu,
-        train_device = conf.training.training_gpu
+        store_device = "cuda:0",
+        train_device = "cuda:0"
     )
     
     

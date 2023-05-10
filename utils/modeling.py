@@ -10,10 +10,9 @@ class Model_Recursive_LSTM_v2(nn.Module):
         input_size,
         comp_embed_layer_sizes=[600, 350, 200, 180],
         drops=[0.225, 0.225, 0.225, 0.225],
-        output_size=1,
-        lstm_embedding_size=100,
+        output_size=3,
         expr_embed_size=100,
-        loops_tensor_size=8,
+        loops_tensor_size=2,
         device="cpu",
         num_layers=1,
         bidirectional=True,
@@ -28,7 +27,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         ] + comp_embed_layer_sizes[-2:]
         
         comp_embed_layer_sizes = [
-            input_size + lstm_embedding_size * (2 if bidirectional else 1) * num_layers + expr_embed_size
+            input_size + expr_embed_size
         ] + comp_embed_layer_sizes
         
         self.comp_embedding_layers = nn.ModuleList()
@@ -38,12 +37,6 @@ class Model_Recursive_LSTM_v2(nn.Module):
         self.concat_layers = nn.ModuleList()
         self.concat_dropouts = nn.ModuleList()
         
-        # Create the transformation encoding layers
-        self.encode_vectors = nn.Linear(
-            MAX_TAGS,
-            MAX_TAGS,
-            bias=True,
-        )
         # Create the computation embedding layers
         for i in range(len(comp_embed_layer_sizes) - 1):
             self.comp_embedding_layers.append(
@@ -78,6 +71,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         nn.init.xavier_uniform_(self.predict.weight)
         self.ELU = nn.ELU()
         self.LeakyReLU = nn.LeakyReLU(0.01)
+        self.Softmax = nn.Softmax(dim=0)
         # Initialize a tensor to represent the absence of computations at a level in the program tree
         self.no_comps_tensor = nn.Parameter(
             nn.init.xavier_uniform_(torch.zeros(1, embedding_size))
@@ -97,14 +91,6 @@ class Model_Recursive_LSTM_v2(nn.Module):
         # LSTM to encode program roots
         self.roots_lstm = nn.LSTM(
             comp_embed_layer_sizes[-1], embedding_size, batch_first=True
-        )
-        # LSTM to encode computations
-        self.transformation_vectors_embed = nn.LSTM(
-            MAX_TAGS,
-            lstm_embedding_size,
-            batch_first=True,
-            bidirectional=bidirectional,
-            num_layers=num_layers,
         )
         # LSTM to encode computation expressions
         self.exprs_embed = nn.LSTM(
@@ -162,10 +148,12 @@ class Model_Recursive_LSTM_v2(nn.Module):
             x = self.concat_layers[i](x)
             x = self.concat_dropouts[i](self.ELU(x))
         return x
-
+#     def approximate_output(continious_predictions):
+        
+        
     def forward(self, tree_tensors):
         # Separate the input tensor
-        tree, comps_tensor_first_part, comps_tensor_vectors, comps_tensor_third_part, loops_tensor, functions_comps_expr_tree = tree_tensors
+        tree, comps_tensor, loops_tensor, functions_comps_expr_tree = tree_tensors
         
         # Embed all the expressions in the tree 
         batch_size, num_comps, len_sequence, len_vector = functions_comps_expr_tree.shape
@@ -179,25 +167,12 @@ class Model_Recursive_LSTM_v2(nn.Module):
         )
         
         # Embed all the computations in the tree
-        batch_size, num_comps, __dict__ = comps_tensor_first_part.shape
+        batch_size, num_comps, __dict__ = comps_tensor.shape
         
-        first_part = comps_tensor_first_part.to(self.device).view(batch_size * num_comps, -1)
-        vectors = comps_tensor_vectors.to(self.device) # No need to reshape this tensor since we transformed it when loading the data
-        third_part = comps_tensor_third_part.to(self.device).view(batch_size * num_comps, -1)
-        
-        # Pass the transformation vectors through the vector encoding LSTM
-        vectors = self.encode_vectors(vectors)
-        _, (prog_embedding, _) = self.transformation_vectors_embed(vectors)
-        prog_embedding = prog_embedding.permute(1, 0, 2).reshape(
-            batch_size * num_comps, -1
-        )
-        
-        # Concatinate the leftover parts from the computatuion, the vectors embedding, and the expression embedding
+        first_part = comps_tensor.to(self.device).view(batch_size * num_comps, -1)
         x = torch.cat(
             (
                 first_part,
-                prog_embedding,
-                third_part,
                 expr_embedding,
             ),
             dim=1,
@@ -232,6 +207,32 @@ class Model_Recursive_LSTM_v2(nn.Module):
             x = self.regression_layers[i](x)
             x = self.regression_dropouts[i](self.ELU(x))
         out = self.predict(x)
-        # We know the speedups to be predicted need to be greater or  equal to zero
-        # We use the LeakyRelu to assure this while avoiding the dying ReLu problem
-        return self.LeakyReLU(out[:, 0, 0])
+        
+#         output = torch.cat(
+#             (
+#                 self.Softmax(out[:,0,:10]),
+#                 torch.sigmoid(out[:,0,10:11]),
+#                 torch.sigmoid(out[:,0,11:12]),
+#                 torch.sigmoid(out[:,0,12:]),
+#             ),
+#             dim=-1
+#         )
+#         output = torch.cat(
+#             (
+#                 out[:,0,:10],
+#                 torch.sigmoid(out[:,0,10:11]),
+#                 torch.sigmoid(out[:,0,11:12]),
+#                 torch.sigmoid(out[:,0,12:]),
+#             ),
+#             dim=-1
+#         )
+        output = torch.cat(
+            (
+                torch.sigmoid(out[:,0,0:1]),
+                torch.sigmoid(out[:,0,1:2]),
+                torch.sigmoid(out[:,0,2:]),
+            ),
+            dim=-1
+        )
+        return output
+#         return self.LeakyReLU(out[:, 0, :])

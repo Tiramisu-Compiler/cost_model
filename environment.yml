@@ -1,4 +1,4 @@
-name: cost_model_env
+name: model_env
 channels:
       - pytorch
       - defaults

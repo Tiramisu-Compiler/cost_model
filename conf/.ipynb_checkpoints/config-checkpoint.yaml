@@ -14,7 +14,7 @@ training:
     log_file: "logs.txt" # Just the name
     lr: 0.0001
     max_epochs: 20000
-    training_gpu: "2"
+    training_gpu: "cpu"
     validation_gpu: "cpu"
     continue_training: False
     model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_b14a.pt"

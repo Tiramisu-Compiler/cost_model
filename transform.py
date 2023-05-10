@@ -13,7 +13,7 @@ os.environ["CXX"] = "c++"
 os.environ["CC"] = "gcc"
 os.environ['GXX'] = 'g++'
 
-os.environ["TIRAMISU_ROOT"] = "/data/kb4083/tiramisu"
+os.environ["TIRAMISU_ROOT"] = "/data/scratch/mmerouani/tiramisu4/tiramisu"
 os.environ["LD_LIBRARY_PATH"] = "$TIRAMISU_ROOT/3rdParty/Halide/lib/:$TIRAMISU_ROOT/3rdParty/llvm/build/lib:$TIRAMISU_ROOT/build:$TIRAMISU_ROOT/3rdParty/isl/build/lib"
 
 class ScheduleExecutionCrashed(Exception):
@@ -75,7 +75,7 @@ def get_function_transformations(model, program_dict):
         loops_placeholders_indices_dict
     ) = get_representation_template(
         program_dict,
-        train_device="cuda:0",
+        train_device="cpu",
     )
     schedule_json = program_dict['schedules_list'][0]
     program_json = program_dict["program_annotation"]
@@ -89,13 +89,13 @@ def get_function_transformations(model, program_dict):
                 )
     inputs = (
                 prog_tree,
-                comps_tensor.to("cuda:0"),
-                loops_tensor.to("cuda:0"),
-                comps_expr_repr.to("cuda:0"),
+                comps_tensor.to("cpu"),
+                loops_tensor.to("cpu"),
+                comps_expr_repr.to("cpu"),
             ) 
     # Forward pass
     model.eval()
-    model.to("cuda:0")
+    model.to("cpu")
     output = model(inputs)
     return output
 # Function to read the original code
@@ -108,6 +108,7 @@ class TiramisuProgram():
         self.schedules_legality = {}
         self.schedules_solver = {}
         self.original_str = None
+        self.nb_iterators = 0
         self.wrappers = None
         if (file_path):
             self.load_code_lines()
@@ -191,7 +192,7 @@ def get_legality_code(tiramisu_program, optimizations_list, nb_iterators):
     comps = tiramisu_program.comps
     first_comp = comps[0]
     # Add code to the original file to get legality result
-    legality_check_lines = '''\n\tprepare_schedules_for_legality_checks();\n\tperform_full_dependency_analysis();\n\tbool is_legal=true;'''
+    legality_check_lines = '''\n\tprepare_schedules_for_legality_checks();\n\tperforme_full_dependency_analysis();\n\tbool is_legal=true;'''
     for optim in optimizations_list:
         if optim.type == 0:
             legality_check_lines += '''\n\tis_legal &= loop_parallelization_is_legal(''' + str(
@@ -212,11 +213,10 @@ def get_legality_code(tiramisu_program, optimizations_list, nb_iterators):
     cpp_code = tiramisu_program.original_str.replace(
         tiramisu_program.code_gen_line, legality_check_lines)
     return cpp_code
-def get_first_legal_parallelization(program, nb_iterators):
+def get_first_legal_parallelization(program, nb_iterators, output_path):
     for i in range(nb_iterators):
         optimization_list = [Optimization(0, i, -1, program.comps)]
         code = get_legality_code(program, optimization_list, nb_iterators)
-        output_path = "/data/kb4083/cost_model_code2sched/_tmp"
         output_path = os.path.join(
             output_path, f'{program.name}_legality')
         legal = run_cpp_code(cpp_code=code, output_path=output_path)
@@ -224,11 +224,10 @@ def get_first_legal_parallelization(program, nb_iterators):
         if legal:
             return i
     return None
-def get_first_legal_tiling(program, nb_iterators):
+def get_first_legal_tiling(program, nb_iterators, output_path):
     for i in range(nb_iterators):
         optimization_list = [Optimization(1, i, 32, program.comps)]
         code = get_legality_code(program, optimization_list, nb_iterators)
-        output_path = "/data/kb4083/cost_model_code2sched/_tmp"
         output_path = os.path.join(
             output_path, f'{program.name}_legality')
         legal = run_cpp_code(cpp_code=code, output_path=output_path)
@@ -236,11 +235,10 @@ def get_first_legal_tiling(program, nb_iterators):
         if legal:
             return i
     return None
-def get_first_legal_unrolling(program, nb_iterators):
+def get_first_legal_unrolling(program, nb_iterators, output_path):
     for i in range(nb_iterators):
         optimization_list = [Optimization(2, i, 4, program.comps)]
         code = get_legality_code(program, optimization_list, nb_iterators)
-        output_path = "/data/kb4083/cost_model_code2sched/_tmp"
         output_path = os.path.join(
             output_path, f'{program.name}_legality')
         legal = run_cpp_code(cpp_code=code, output_path=output_path)
@@ -251,9 +249,10 @@ def get_first_legal_unrolling(program, nb_iterators):
 # Function to run a generator and return its output
 def get_transformed_code(tiramisu_program, optimizations_list):
     comps = tiramisu_program.comps
+    nb_iterators = tiramisu_program.nb_iterators
     first_comp = comps[0]
     # Add code to the original file to get legality result
-    legality_check_lines = '''\n\tprepare_schedules_for_legality_checks();\n\tperform_full_dependency_analysis();\n\tbool is_legal=true;'''
+    legality_check_lines = '''\n\tprepare_schedules_for_legality_checks();\n\tperforme_full_dependency_analysis();\n\tbool is_legal=true;'''
     for optim in optimizations_list:
         if optim.type == 0:
             legality_check_lines += '''\n\tis_legal &= loop_parallelization_is_legal(''' + str(
@@ -282,7 +281,7 @@ def write_to_disk(cpp_code: str, output_path: str, extension: str = '.cpp'):
 def get_cpu_exec_times(tiramisu_program, optims_list, function_root_path):
         # Get the code of the schedule
         cpp_code = get_transformed_code(tiramisu_program, optims_list)
-        os.environ["TIRAMISU_ROOT"] = "/data/kb4083/tiramisu"
+        os.environ["TIRAMISU_ROOT"] = "/data/scratch/mmerouani/tiramisu4/tiramisu"
         # Write the code to a file
         output_path = os.path.join(
             function_root_path, tiramisu_program.name)
@@ -293,7 +292,7 @@ def get_cpu_exec_times(tiramisu_program, optims_list, function_root_path):
         if True:
             # Making the tiramisu root path explicit to the env
             shell_script = [
-                f"export TIRAMISU_ROOT=/data/kb4083/tiramisu",
+                f"export TIRAMISU_ROOT=/data/scratch/mmerouani/tiramisu4/tiramisu",
                 f"cd {function_root_path}",
                 # Compile intermidiate tiramisu file
                 f"$CXX -I$TIRAMISU_ROOT/3rdParty/Halide/include -I$TIRAMISU_ROOT/include -I$TIRAMISU_ROOT/3rdParty/isl/include  -Wl,--no-as-needed -ldl -g -fno-rtti   -lpthread -std=c++11 -O0 -o {tiramisu_program.name}.o -c {cpp_file_path}",
@@ -307,6 +306,7 @@ def get_cpu_exec_times(tiramisu_program, optims_list, function_root_path):
             ]
 
         run_script = [
+#             f"ssh lanka16",
             # cd to the workspace
             f"cd {function_root_path}",
             f"export LD_LIBRARY_PATH=$TIRAMISU_ROOT/3rdParty/Halide/lib/:$TIRAMISU_ROOT/3rdParty/llvm/build/lib:$TIRAMISU_ROOT/build:$TIRAMISU_ROOT/3rdParty/isl/build/lib",
@@ -400,15 +400,14 @@ def compile_annotations(tiramisu_program, output_path):
         tiramisu_program.code_gen_line, get_json_lines)
     return run_cpp_code(cpp_code=cpp_code, output_path=output_path)
 def load_model(conf, path):
-    model_path = "/data/kb4083/cost_model_code2sched/weights/best_model_Code2sched_PTU_modified_output_loss_no_softmax_div_4_20000_c6a.pt"
     model = Model_Recursive_LSTM_v2(
         input_size=conf.model.input_size,
         comp_embed_layer_sizes=list(conf.model.comp_embed_layer_sizes),
         drops=list(conf.model.drops),
         loops_tensor_size=2,
-        device="cuda:0",
+        device="cpu",
     )
-    model.load_state_dict(torch.load(model_path, map_location="cuda:0"))
+    model.load_state_dict(torch.load(path, map_location="cpu"))
     model.eval()
     return model
 def transform_function(model, workspace, function_name, output_file_path):
@@ -420,7 +419,7 @@ def transform_function(model, workspace, function_name, output_file_path):
     program_annotations = json.loads(compile_annotations(prog, function_path))
     first_schedule = json.loads(compile_initial_schedule(prog, function_path))
     nb_iterators = len(program_annotations["iterators"])
-    
+    prog.nb_iterators = nb_iterators
     program_dict = {}
     program_dict["program_annotation"] = program_annotations
     program_dict["schedules_list"] = []
@@ -432,23 +431,23 @@ def transform_function(model, workspace, function_name, output_file_path):
     tiling_level = parallelization_level = unrolling_level = None
     if out[0]:
         # Tiling
-        tiling_level = get_first_legal_tiling(prog, nb_iterators)
+        tiling_level = get_first_legal_tiling(prog, nb_iterators, function_path)
 
     if out[1]:
         # Parallelization
-        parallelization_level = get_first_legal_parallelization(prog, nb_iterators)
+        parallelization_level = get_first_legal_parallelization(prog, nb_iterators, function_path)
             
     if out[2]:
         # Unrollling
-        unrolling_level = get_first_legal_unrolling(prog, nb_iterators)
+        unrolling_level = get_first_legal_unrolling(prog, nb_iterators, function_path)
 
     optimzation_list = []
-    if parallelization_level is not None:
-        optimzation_list.append(Optimization(0, parallelization_level, -1, prog.comps))
-    if tiling_level is not None:
-        optimzation_list.append(Optimization(1, tiling_level, 32, prog.comps))
-    if unrolling_level is not None:
-        optimzation_list.append(Optimization(2, unrolling_level, 4, prog.comps))
+#     if parallelization_level is not None:
+#         optimzation_list.append(Optimization(0, parallelization_level, -1, prog.comps))
+#     if tiling_level is not None:
+#         optimzation_list.append(Optimization(1, tiling_level, 32, prog.comps))
+#     if unrolling_level is not None:
+#         optimzation_list.append(Optimization(2, unrolling_level, 4, prog.comps))
         
     
     code = get_transformed_code(prog, optimzation_list)
@@ -459,11 +458,13 @@ def transform_function(model, workspace, function_name, output_file_path):
         
 @hydra.main(config_path="conf", config_name="config")        
 def main(conf):
-    model = load_model(conf, "/data/kb4083/cost_model_code2sched/weights/best_model_Code2sched_PTU_modified_output_loss_no_softmax_div_4_20000_c6a.pt")
-    workspace = "/data/kb4083/cost_model_code2sched/evaluation_programs/"
+    model = load_model(conf, "/data/commit/tiramisu/data_factory_kb4083/code2sched/cost_model/best_model_Code2sched_PTU_modified_output_loss_no_softmax_div_4_20000_c6a.pt")
+    print("Done loading model")
+    workspace = "/data/commit/tiramisu/data_factory_kb4083/code2sched/cost_model/progs"
     functions_list = [directory for directory in next(os.walk(workspace))[1] if "function" in directory]
     for function_name in functions_list:
-        transform_function(model, workspace, function_name, "/data/kb4083/cost_model_code2sched/evaluation_programs/execution_times.txt")
-    
+        print(f"Working on {function_name}")
+        transform_function(model, workspace, function_name, "/data/commit/tiramisu/data_factory_kb4083/code2sched/cost_model/progs/execution_times.txt")
+        print(f"{function_name} done")
 if __name__ == "__main__":
     main()

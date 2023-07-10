@@ -61,12 +61,12 @@ def train_model(
         dataloader_size["val"] += label.shape[0]
     
     # Use the 1cycle learning rate policy
-#     scheduler = OneCycleLR(
-#         optimizer,
-#         max_lr=max_lr,
-#         steps_per_epoch=len(dataloader["train"]),
-#         epochs=num_epochs,
-#     )
+    scheduler = OneCycleLR(
+        optimizer,
+        max_lr=max_lr,
+        steps_per_epoch=len(dataloader["train"]),
+        epochs=num_epochs,
+    )
     
     for epoch in range(num_epochs):
         epoch_start = time.time()
@@ -117,7 +117,6 @@ def train_model(
                         # Backpropagation
                         loss.backward()
                         optimizer.step()
-#                         scheduler.step()
                 pbar.set_description("Loss: {:.3f}".format(loss.item()))
                 running_loss += loss.item() * labels.shape[0]
                 # Send the labels back to the original device 
@@ -185,6 +184,7 @@ def train_model(
                     )
             else:
                 train_loss = epoch_loss
+                scheduler.step()
     time_elapsed = time.time() - since
 
     print(

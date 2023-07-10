@@ -1,10 +1,11 @@
 experiment:
-    name: "Baseline_data_no_one_cycle000001"
+    name: "Baseline_new_patterns_para"
     base_path: "/data/kb4083/cost_model"
+# /data/kb4083/datasets/all_nr_data/dataset_expr_batch101-1227605_clean_train.pkl
 
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_train.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/extended_tags/dataset_expr_batch550000-838143_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/all_nr_data_para/dataset_expr_batch101-1227605_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/all_nr_data_para/dataset_expr_batch101-1227605_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "dataset_new_data"
     batch_size: 1024
@@ -12,21 +13,20 @@ data_generation:
 
 training: 
     log_file: "logs.txt" # Just the name
-    lr: 0.00001
+    lr: 0.001
     max_epochs: 500
-    training_gpu: "3"
+    training_gpu: "cuda:5"
     validation_gpu: "cpu"
     continue_training: False
-    model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_b14a.pt"
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_old_patterns_ASPLOS_4675.pt"
 
 testing:
     testing_model_weights_path: "/data/kb4083/cost_model/best_model_Baseline_176b.pt" # Model weights to evaluate
     gpu: "cuda:2" # GPU to validate on
-    
 
 wandb:
     use_wandb: True
-    project: "release_model"
+    project: "ASPLOS"
     
 model: 
     input_size: 846

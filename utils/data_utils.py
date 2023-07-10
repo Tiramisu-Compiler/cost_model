@@ -40,7 +40,7 @@ MAX_TAGS = 16
 MAX_DEPTH = 5
 
 # Maximum length of expressions in the dataset
-MAX_EXPR_LEN = 62
+MAX_EXPR_LEN = 66
 
 # Creates a template for the input representation
 def get_representation_template(program_dict, train_device="cpu"):
@@ -1566,14 +1566,14 @@ def get_schedule_str(program_json, sched_json):
                     iterator_comp_name = fusion[0]
                     transf_loop_nest = program_json["computations"][iterator_comp_name]["iterators"].copy()
                     schedule = sched_json[iterator_comp_name]
-                
+        # Change fusion to include loops
         sched_str += '{' + name + '}:'
 
         for transformation in schedule["transformations_list"]:
 
             if (transformation[0] == 1):
                 sched_str += "I(L" + str(transformation[1]) + ",L" + str(transformation[2]) + ")"
-                
+                # Change loop nest to reflect interchange
             elif (transformation[0] == 2):
                 sched_str += "R(L" + str(transformation[3])+ ")"
             elif (transformation[0] == 3):

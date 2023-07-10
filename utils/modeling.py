@@ -3,6 +3,12 @@ import torch
 from torch import nn
 from utils.data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
 
+def initialization_function_sparse(x):
+    return nn.init.sparse_(x, sparsity=0.1)
+
+def initialization_function_xavier(x):
+    return nn.init.xavier_uniform_(x)
+
 # Define the architecture of the cost model
 class Model_Recursive_LSTM_v2(nn.Module):
     def __init__(
@@ -51,7 +57,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
                     comp_embed_layer_sizes[i], comp_embed_layer_sizes[i + 1], bias=True
                 )
             )
-            nn.init.xavier_uniform_(self.comp_embedding_layers[i].weight)
+            initialization_function_xavier(self.comp_embedding_layers[i].weight)
             self.comp_embedding_dropouts.append(nn.Dropout(drops[i]))
         # Create the final regression layers
         for i in range(len(regression_layer_sizes) - 1):
@@ -60,7 +66,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
                     regression_layer_sizes[i], regression_layer_sizes[i + 1], bias=True
                 )
             )
-            nn.init.xavier_uniform_(self.regression_layers[i].weight)
+            initialization_function_xavier(self.regression_layers[i].weight)
             self.regression_dropouts.append(nn.Dropout(drops[i]))
             
         # Create the feed forward netwrok responsible for embedding loop levels
@@ -68,23 +74,23 @@ class Model_Recursive_LSTM_v2(nn.Module):
             self.concat_layers.append(
                 nn.Linear(concat_layer_sizes[i], concat_layer_sizes[i + 1], bias=True)
             )
-            nn.init.xavier_uniform_(self.concat_layers[i].weight)
+            initialization_function_xavier(self.concat_layers[i].weight)
             nn.init.zeros_(self.concat_layers[i].weight)
             self.concat_dropouts.append(nn.Dropout(drops[i]))
         # Output layer
         self.predict = nn.Linear(regression_layer_sizes[-1], output_size, bias=True)
         
         
-        nn.init.xavier_uniform_(self.predict.weight)
+        initialization_function_xavier(self.predict.weight)
         self.ELU = nn.ELU()
         self.LeakyReLU = nn.LeakyReLU(0.01)
         # Initialize a tensor to represent the absence of computations at a level in the program tree
         self.no_comps_tensor = nn.Parameter(
-            nn.init.xavier_uniform_(torch.zeros(1, embedding_size))
+            initialization_function_xavier(torch.zeros(1, embedding_size))
         )
         # Initialize a tensor to represent the absence of child loops at a level in the program tree
         self.no_nodes_tensor = nn.Parameter(
-            nn.init.xavier_uniform_(torch.zeros(1, embedding_size))
+            initialization_function_xavier(torch.zeros(1, embedding_size))
         )
         # LSTM to encode computations
         self.comps_lstm = nn.LSTM(

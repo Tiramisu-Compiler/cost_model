@@ -20,16 +20,12 @@ def main(conf):
                         level = logging.DEBUG,
                         format = '%(asctime)s:%(levelname)s:  %(message)s')
     logging.info(f"Starting experiment {conf.experiment.name}")
-    # Set the only visible GPU device to be the one specified in the configuration file
-    os.environ["CUDA_VISIBLE_DEVICES"] = [
-        conf.training.training_gpu,
-        conf.training.validation_gpu
-    ] if conf.training.validation_gpu != "cpu" else conf.training.training_gpu
-    print(f"CUDA_VISIBLE_DEVICES is set to {os.environ['CUDA_VISIBLE_DEVICES']}")
-    # We train on the first available device set by the CUDA_VISIBLE_DEVICES variable
-    train_device = torch.device(0)
+    
+    # We train on the device set by the user in the conf file
+    train_device = torch.device(conf.training.training_gpu)
+    
     # If a GPU is being used for validation, we use it otherwise we use the cpu
-    validation_device = torch.device(conf.training.validation_gpu) if conf.training.validation_gpu == "cpu" else torch.device(1)
+    validation_device = torch.device(conf.training.validation_gpu)
     # Defining the model
     logging.info("Defining the model")
     model = Model_Recursive_LSTM_v2(

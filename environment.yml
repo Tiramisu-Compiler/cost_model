@@ -10,7 +10,7 @@ dependencies:
       - pytorch=1.12.1
       - scipy==1.9.1
       - numpy==1.22.3
-      - pandas==1.4.2
+      - pandas==1.4.1
       - scikit-learn==1.1.2
       - pip
       - pip:

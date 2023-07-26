@@ -12,24 +12,11 @@ import torch
 import torch.nn.functional as F
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import init_process_group, destroy_process_group
 import os
 # Calculate the mean absolute percentage error
 def mape_criterion(inputs, targets):
     eps = 1e-5
     return 100 * torch.mean(torch.abs(targets - inputs) / (targets + eps))
-
-def ddp_setup(rank: int, world_size: int):
-  """
-  Args:
-      rank: Unique identifier of each process
-     world_size: Total number of processes
-  """
-  os.environ["MASTER_ADDR"] = "localhost"
-  os.environ["MASTER_PORT"] = "12355"
-  init_process_group(backend="nccl", rank=rank, world_size=world_size)
-
 
 def train_model(
     config,
@@ -199,5 +186,4 @@ def train_model(
             time_elapsed // 60, time_elapsed % 60, best_loss
         )
     )
-    destroy_process_group()
     return losses, best_model

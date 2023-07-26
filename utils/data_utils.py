@@ -583,7 +583,6 @@ def get_func_repr_task(input_q, output_q):
         ]
         # Get the program tree footprint
         tree_footprint = get_tree_footprint(prog_tree)
-        
         local_function_dict = {
             "tree": prog_tree,
             "comps_tensor_list": [],
@@ -948,11 +947,12 @@ def load_data_into_pkls_parallel(train_val_dataset_file, nb_processes=15, repr_p
 
 # Returns a representation of the tree structure of the program
 def get_tree_footprint(tree):
+    footprint = ""
     if "roots" in tree :
-        footprint = "<R>"
         for root in tree["roots"]:
+            footprint += "<R>"
             footprint += get_tree_footprint(root)
-        footprint += "</R>"
+            footprint += "</R>"
         return footprint
     footprint = "<L" + str(int(tree["loop_index"])) + ">"
     if tree["has_comps"]:

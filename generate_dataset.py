@@ -6,11 +6,9 @@ from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
 
-
 @hydra.main(config_path="conf", config_name="config")
 def generate_datasets(conf):
     """Converts and split into batches the validation and training dataset.
-
     Args:
         conf (RecursiveLSTMConfig): The configuration of the repository.
     """
@@ -98,7 +96,8 @@ def generate_datasets(conf):
         train_repr_pkl_output_folder,
         max_batch_size = conf.data_generation.batch_size,
         store_device = conf.training.training_gpu,
-        train_device = conf.training.training_gpu
+        train_device = conf.training.training_gpu,
+        min_functions_per_tree_footprint = conf.data_generation.min_functions_per_tree_footprint
     )
     
     

@@ -586,6 +586,7 @@ def get_func_repr_task(input_q, output_q):
         ]
         # Get the program tree footprint
         tree_footprint = get_tree_footprint(prog_tree)
+        
         local_function_dict = {
             "tree": prog_tree,
             "comps_tensor_list": [],
@@ -683,7 +684,8 @@ class Dataset_parallel:
         train_device = "cpu",
         repr_pkl_output_folder = "none",
         just_load_pickled_repr = False,
-        nb_processes = 15
+        nb_processes = 15,
+        min_functions_per_tree_footprint=0
     ):
 
         # Structure to contain the batched inputs
@@ -703,6 +705,9 @@ class Dataset_parallel:
         self.nb_datapoints = 0
         # number of batches that can fit in the GPU
         self.gpu_fitted_batches_index = -1
+        
+        self.nb_funcs_per_footprint = {}
+        
         processes_output_list = []
         programs_dict = {}
         batches_dict = dict()
@@ -808,6 +813,11 @@ class Dataset_parallel:
 
             self.nb_dropped += nb_dropped
             self.nb_datapoints += len(local_function_dict['speedups_list'])
+            
+            self.nb_funcs_per_footprint[tree_footprint] = self.nb_funcs_per_footprint.get(tree_footprint, {'nb_funcs':0,'nb_dps':0}) 
+            self.nb_funcs_per_footprint[tree_footprint]['nb_funcs']+=1
+            self.nb_funcs_per_footprint[tree_footprint]['nb_dps']+=len(local_function_dict['speedups_list'])
+            
         # Delete unused variables
         del processes_output_list
         del programs_dict
@@ -818,6 +828,11 @@ class Dataset_parallel:
         # For each tree footprint in the dataset
         # A footprint represents the structure of each function. We batch functions according to their tree footprint so that the forward pass to the model can be correctly executed
         for tree_footprint in tqdm(batches_dict):
+            
+            #if less than x funcs in the batch and less than x*100 datapoints skip the batch
+            if self.nb_funcs_per_footprint[tree_footprint]['nb_funcs']<min_functions_per_tree_footprint and self.nb_funcs_per_footprint[tree_footprint]['nb_dps']<100*min_functions_per_tree_footprint:
+                self.nb_datapoints-=self.nb_funcs_per_footprint[tree_footprint]['nb_dps']
+                continue
             # Shuffling the lists inside each footprint to avoid having batches with very low program diversity
             zipped = list(
                 zip(
@@ -908,7 +923,7 @@ class Dataset_parallel:
         return len(self.batched_Y)    
 
 # Function to read the pkls written by the load_data_into_pkls_parallel function, batch the loaded data and return the batched data to be saved
-def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_device="cpu", train_device="cpu"):
+def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_device="cpu", train_device="cpu", min_functions_per_tree_footprint=0):
     dataset = Dataset_parallel(
         None, 
         max_batch_size, 
@@ -916,7 +931,8 @@ def load_pickled_repr(repr_pkl_output_folder=None,max_batch_size = 1024, store_d
         repr_pkl_output_folder=repr_pkl_output_folder, 
         just_load_pickled_repr=True, 
         store_device=store_device, 
-        train_device=train_device)
+        train_device=train_device,
+        min_functions_per_tree_footprint=min_functions_per_tree_footprint)
     
     indices = list(range(len(dataset)))
     batches_list = []

@@ -17,6 +17,7 @@ from scipy.stats import spearmanr
 from sklearn.metrics import ndcg_score
 import enum
 import os, psutil
+import sympy
 
 # An exception to limit the maximum number of allowed transformations 
 class NbTranformationException(Exception):
@@ -378,7 +379,9 @@ def get_schedule_representation(
         
         assert(MAX_DEPTH*MAX_DEPTH*2 == nb_mat_elements)
         
-        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name).flatten().tolist()
+        padded_coeff_mat, padded_constants_col = get_padded_initial_iteration_domain(program_json,comp_name, pad=True)
+        
+        comps_repr[ogc_start[0]][ogc_start[1] : ogc_end[1] + 1 ] = padded_coeff_mat.flatten().tolist()
         
         
         # Add the padded original constraints vector to the representation
@@ -388,7 +391,7 @@ def get_schedule_representation(
         
         nb_mat_elements = ogv_end[1] - ogv_start[1] + 1
         
-        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name)
+        comps_repr[ogv_start[0]][ogv_start[1] : ogv_end[1] + 1 ] = padded_constants_col.tolist()
         
         # Add the padded transformed constraints vector to the representation
         c_start = comps_placeholders_indices_dict[c_code+'-ConstraintMatrixStart']
@@ -399,7 +402,7 @@ def get_schedule_representation(
 
         assert(MAX_DEPTH*MAX_DEPTH*2 == nb_mat_elements)
         
-        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name).flatten().tolist()
+        comps_repr[c_start[0]][ c_start[1] : c_end[1] + 1 ] = get_padded_transformed_iteration_domain(program_json, schedule_json, comp_name).flatten().tolist()
         
 
     # Fill the loop representation
@@ -952,7 +955,7 @@ def get_tree_footprint(tree):
         for root in tree["roots"]:
             footprint += "<R>"
             footprint += get_tree_footprint(root)
-            footprint += "</R>"
+        footprint += "</R>"
         return footprint
     footprint = "<L" + str(int(tree["loop_index"])) + ">"
     if tree["has_comps"]:
@@ -1334,156 +1337,137 @@ def get_tree_expr_repr(node, comp_type):
 # A constraint matrix is the set of linear inequalities that describes the iteration domain.
 # Example:
 # if the iteration domain D is the follwoing
-#     {i > 0
+#     {i >= 0
 #      i < 128
-# D =  j > 0
+# D =  j >= 0
 #      j < 32
-#      k > 0
+#      k >= 0
 #      k < 64}
 # The iterator vector is 
 # x = [i, 
 #      j, 
 #      k]
-# The constraint matrix A would be:
+# The coeffcients matrix A would be:
 #     [-1,   0,   0,
 #       1,   0,   0,
 # A=    0,  -1,   0,
 #       0,   1,   0,
 #       0,   0,  -1,
 #       0,   0,   1]
-# The second hand side of the equation b is the vector:
+# The second hand side of the equation b (constants vector) is the vector:
 #     b= [0,
-#         128,
+#         127,
 #         0,
-#         32,
+#         31,
 #         0,
-#         64]
+#         63]
 # Since:
-#    D = Ax<b
+#    D = Ax<=b
 # Get the matrix describing the initial constraints for this program
-def get_padded_initial_constrain_matrix(program_json, schedule_json, comp_name):
+# EDIT: Padding is done with zeros, this idea is no longer in use. ignore the following comment. --- For consistency, The padding of the coefficients part is done by adding -1,1 in a diagonal-ish manner. The constants vector is padded with zeros
+def get_padded_initial_iteration_domain(program_json,comp_name, pad=True):
+    #supports bounds of type ± i ± j ±...± cst and max(cst, iter)
+    comp_dict = program_json['computations'][comp_name] 
+    nb_dims = len(comp_dict['iterators'])
     
-    iterators_list = program_json["computations"][comp_name]["iterators"]
-    result = []
-    for i in iterators_list:
-        for j in range(2):
-            if j == 0 :
-                result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
+    coeff_mat = np.zeros((nb_dims*2,nb_dims),int)
+    constants_col = np.zeros((nb_dims*2),int)
+    
+    for i,iterator_name_row in enumerate(comp_dict['iterators']):# rows loop
+        
+        # set the diagonal-ish values
+        coeff_mat[i*2,i]=-1
+        coeff_mat[i*2+1,i]=1
+        
+        iterator_row_dict = program_json['iterators'][iterator_name_row]
+        
+        #get the simplified expression of the bounds
+        upper_bound = str(sympy.simplify(iterator_row_dict['upper_bound'])).replace(' ','')
+        lower_bound = str(sympy.simplify(iterator_row_dict['lower_bound'])).replace(' ','')
+        
+        # in some special cases, the lower bound of i appears as max(cst, iter) when iter<=i. The following is a non-general solution
+        if 'max' in lower_bound or 'Max' in lower_bound:
+            lower_bound = re.findall('[mM]ax\(.+,(.+)\)',lower_bound)[0]
+        
+        # find the iterator names and constants used in the bounds
+        iterators_in_upper = re.findall('[a-zA-Z]\w*', upper_bound)
+        constants_in_upper = re.findall('(?:^|\+|-)\d+', upper_bound)
+        iterators_in_lower = re.findall('[a-zA-Z]\w*', lower_bound)
+        constants_in_lower = re.findall('(?:^|\+|-)\d+', lower_bound)
+        
+        #if no constants used, set to 0
+        if not constants_in_upper:
+            constants_in_upper = [0]
+        else:
+            assert len(constants_in_upper)==1
+       
+        if not constants_in_lower:
+            constants_in_lower = [0]
+        else:
+            assert len(constants_in_lower)==1
+        
+        #for each iterator in the bounds expression, set the corresponding values in the matrix
+        for iter_name in iterators_in_upper:
+            col_idx = comp_dict['iterators'].index(iter_name)
+            if '-'+iter_name in upper_bound:
+                coeff_mat[i*2+1,col_idx]=1
             else:
-                result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
-    result = np.array(result)            
-    result = np.pad(
-        result,
-        [
-            (0, (MAX_DEPTH)*2 - result.shape[0]),
-            (0, MAX_DEPTH - result.shape[1]),
-        ],
-        mode="constant",
-        constant_values=0,
-    )
-    return result
-
-# Returns the shift of the loop in the non-rectangular case or the bound itself if the bound is an integer
-def extract_shift_from_bound(bound):
-    if is_int(bound):
-        return int(bound)
-    if "+" not in bound and "-" not in bound:
-        return 0
+                coeff_mat[i*2+1,col_idx]=-1
+        constants_col[i*2+1]= int(constants_in_upper[0])-1 #adding a -1 because we are representing a non-strict inequality
+        
+        for iter_name in iterators_in_lower:
+            col_idx = comp_dict['iterators'].index(iter_name)
+            if '-'+iter_name in upper_bound:
+                coeff_mat[i*2,col_idx]=-1
+            else:
+                coeff_mat[i*2,col_idx]=+1
+        constants_col[i*2]= -int(constants_in_lower[0])
+                
+#     constants_col = constants_col.reshape(-1,1)
     
-    if "+" in bound:
-        return int(bound[bound.find("+")+1:])
-    if "-" in bound:
-        return -int(bound[bound.find("-")+1:])
     
-# Returns a vector that represents the right hand sise of teh constraint matrix inequalities
-# (The vector b from the previous example)
-def get_padded_second_side_of_the_constraint_equations_original(program_json, schedule_json, comp_name):
-    iterators_list = program_json["computations"][comp_name]["iterators"]
-    result = []
-    for it in iterators_list:
-        if(is_int(program_json["iterators"][it]["lower_bound"])):
-            result.append(int(program_json["iterators"][it]["lower_bound"]))
-        else:
-#             shift = extract_shift_from_bound(program_json["iterators"][it]["lower_bound"])
-            result.append(0)
-        if(is_int(program_json["iterators"][it]["upper_bound"])):
-            result.append(int(program_json["iterators"][it]["upper_bound"]))
-        else:
-#             shift = extract_shift_from_bound(program_json["iterators"][it]["upper_bound"])
-            result.append(0)
-    result = result + [0]*(MAX_DEPTH*2-len(result))
-    return result
-
-# In the case where the bound is shifted, remove the shift and return the iterator only
-# Example: bound: i + 1 the function return i
-def remove_shift_from_bound(bound):
-    # If the bound is an integer or it doesn't have a shift there is nothing to be done
-    if is_int(bound) or ("+" not in bound and "-" not in bound):
-        return bound
-    if "+" in bound:
-        return bound[:bound.find("+")]
-    if "-" in bound:
-        return bound[:bound.find("-")]
-
+    # Add padding if requested
+    if pad:
+        padded_coeff_mat = np.pad(coeff_mat, [(0,MAX_DEPTH*2-nb_dims*2),(0,MAX_DEPTH-nb_dims)], mode='constant', constant_values=0)
+        
+#         #Edit: this idea has been dropped.!! For consistency, The padding of the coefficients part is done by adding -1,1 in a diagonal-ish manner
+#         for i in range(nb_dims,MAX_DEPTH):
+#             padded_coeff_mat[i*2,i]=-1
+#             padded_coeff_mat[i*2+1,i]=1
+            
+        padded_constants_col = np.pad(constants_col, [(0,MAX_DEPTH*2-nb_dims*2)], mode='constant', constant_values=0)
+        return padded_coeff_mat, padded_constants_col
+    else:
+        return coeff_mat, constants_col
+    
 # Get the matrix describing the iteration domain after applying a sequence of affine transformations
 # The transformed constraint matrix is: the original constraint matrix multiplied by the inverse of the transformation matrix
-def get_padded_transformed_constrain_matrix(program_json, schedule_json, comp_name):
-    iterators_list = program_json["computations"][comp_name]["iterators"]
-    
+def get_padded_transformed_iteration_domain(program_json, schedule_json, comp_name, pad=True):
     # Extract the transformations matrix for this schedule
     transformation_matrix = get_transformation_matrix(program_json, schedule_json, comp_name)
     
     # Create the initial constraint matrix without any padding
-    result = []
-    for i in iterators_list:
-        for j in range(2):
-            if j == 0 :
-                result.append(format_bound(i, program_json["iterators"][i]["lower_bound"], iterators_list, True))
-            else:
-                result.append(format_bound(i, program_json["iterators"][i]["upper_bound"], iterators_list, False))
+    A,b = get_padded_initial_iteration_domain(program_json,comp_name, pad=False)
+    nb_dims = A.shape[1]
+        
     # Get the inverse of the transformation matrix
     inverse = np.linalg.inv(transformation_matrix)
     
     # Multiply thw two to gte the transformed constraint matrix
-    result = np.matmul(result, inverse)
+    result = np.matmul(A, inverse)
     result = np.array(result)
     
-    # Add padding
-    result = np.pad(
-        result,
-        [
-            (0, (MAX_DEPTH)*2 - result.shape[0]),
-            (0, MAX_DEPTH - result.shape[1]),
-        ],
+    if pad:
+        result = np.pad(result, [(0, (MAX_DEPTH)*2 - result.shape[0]), (0, MAX_DEPTH - result.shape[1])],
         mode="constant",
-        constant_values=0,
-    )
-    
+        constant_values=0)
+         #EDIT: Padding is done with zeros, this idea is no longer in use. ignore the following comment. ---   For consistency, The padding of the coefficients part is done by adding -1,1 in a diagonal-ish manner
+#         for i in range(nb_dims,MAX_DEPTH):
+#             result[i*2,i]=-1
+#             result[i*2+1,i]=1
+        
     return result
 
-# Check whether the string contains an integer and return true if so
-def is_int(s):
-    if s[0] in ('-', '+'):
-        return s[1:].isdigit()
-    return s.isdigit()
-
-# Helper function to return lines from the constraint matrix
-def format_bound(iterator_name, bound, iterators_list, is_lower):
-    output = []
-    for i in iterators_list:
-        if i == iterator_name:
-            if is_lower :
-                output.append(-1)
-            else:
-                output.append(1)
-        elif (i == bound):
-            if is_lower :
-                output.append(1)
-            else:
-                output.append(-1)
-        else:
-            output.append(0)
-    return output
 
 # Convert a tags vector describing an affine transfromation (Reversal, Skewing, Interchange) into a matrix that represents the same transformation
 def get_trasnformation_matrix_from_vector(transformation, matrix_size):

@@ -12,11 +12,9 @@ dependencies:
       - numpy==1.22.3
       - pandas==1.4.1
       - scikit-learn==1.1.2
+      - sympy==1.12
       - pip
       - pip:
             - hydra-core==1.1.2
             - tqdm==4.59.0
             - wandb==0.12.15
-
-
-

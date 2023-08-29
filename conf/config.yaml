@@ -1,24 +1,26 @@
 experiment:
-    name: "Baseline_all_data_clean_resumed_3"
+    name: "Baseline_new_patterns_para"
     base_path: "/data/kb4083/cost_model"
 # /data/kb4083/datasets/all_nr_data/dataset_expr_batch101-1227605_clean_train.pkl
 
 data_generation:
-    train_dataset_file: "/data/kb4083/datasets/all_nr_data_para_unr/dataset_expr_batch101-1227605_val.pkl"  # training / validation set
-    valid_dataset_file: "/data/kb4083/datasets/all_nr_data_para_unr/dataset_expr_batch101-1227605_val.pkl"
+    train_dataset_file: "/data/kb4083/datasets/all_nr_data_para/dataset_expr_batch101-1227605_train.pkl"  # training / validation set
+    valid_dataset_file: "/data/kb4083/datasets/all_nr_data_para/dataset_expr_batch101-1227605_val.pkl"
     benchmark_dataset_file: "/data/kb4083/model_release/release_code/result_subsample.json"
     dataset_name:  "dataset_new_data"
     batch_size: 1024
     nb_processes: 200
+    min_functions_per_tree_footprint: 2
+
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
-    max_epochs: 1000
-    training_gpu: "cpu"
+    max_epochs: 500
+    training_gpu: "cuda:5"
     validation_gpu: "cpu"
-    continue_training: True
-    model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_all_data_clean_resumed_2_2671.pt"
+    continue_training: False
+    model_weights_path: "/data/kb4083/cost_model/weights/best_model_Baseline_old_patterns_ASPLOS_4675.pt"
 
 testing:
     testing_model_weights_path: "/data/kb4083/cost_model/best_model_Baseline_176b.pt" # Model weights to evaluate

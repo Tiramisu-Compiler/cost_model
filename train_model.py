@@ -1,12 +1,37 @@
 import os
 import io
 import logging
+import random
 import gc
 import hydra
 from hydra.core.config_store import ConfigStore
 from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
+def load_batches_from_path(train_paths, train_devices, val_paths):
+    assert(len(train_paths)>0 and len(val_paths)>0)
+    assert(len(train_paths) == len(train_devices))
+    train_bl = []
+    val_bl = []
+    # Read batches from specified paths
+    for index, path in enumerate(train_paths):
+        if os.path.exists(path):
+            print(f"Loading second part of the training set {path} into {train_devices[index]}")
+            with open(path, "rb") as file:
+                train_bl_2 = torch.load(path, map_location=train_devices[index])
+                train_bl += train_bl_2
+    for path in val_paths:
+        if os.path.exists(path):
+            print(f"Loading second part of the validation set {path} into the CPU")
+            with open(path, "rb") as file:
+                val_bl_2 = torch.load(path, map_location="cpu")
+                val_bl += val_bl_2
+    
+    # Shuffle both training and validation sets
+    random.shuffle(train_bl)
+    random.shuffle(val_bl)
+    
+    return train_bl, val_bl
 @hydra.main(config_path="conf", config_name="config")
 def main(conf):
     # Defining logger
@@ -67,10 +92,8 @@ def main(conf):
     
     # Fuse loaded training batches
     train_bl = train_bl_1 + train_bl_2 if len(train_bl_2) > 0 else train_bl_1
-    
+
     # Validation
-    validation_file_path = os.path.join( conf.experiment.base_path, "batched/valid/", f"{Path(conf.data_generation.valid_dataset_file).parts[-1][:-4]}.pt")
-    
     validation_file_path = os.path.join( conf.experiment.base_path, "batched/valid/", f"{Path(conf.data_generation.valid_dataset_file).parts[-1][:-4]}_CPU.pt")
     if os.path.exists(validation_file_path):
         print(f"Loading second part of the validation set {validation_file_path} into the CPU")
@@ -85,6 +108,7 @@ def main(conf):
     
     # Fuse loaded training batches
     val_bl = val_bl_1 + val_bl_2 if len(val_bl_2) > 0 else val_bl_1
+        
     # Defining training params
     criterion = mape_criterion
     optimizer = torch.optim.AdamW(

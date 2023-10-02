@@ -1574,6 +1574,11 @@ def get_schedule_str(program_json, sched_json):
             if (transformation[0] == 1):
                 sched_str += "I(L" + str(transformation[1]) + ",L" + str(transformation[2]) + ")"
                 # Change loop nest to reflect interchange
+                assert(transformation[1] < len(transf_loop_nest) and transformation[2] < len(transf_loop_nest))
+                tmp_it = transf_loop_nest[transformation[1]]
+                transf_loop_nest[transformation[1]] = transf_loop_nest[transformation[2]]
+                transf_loop_nest[transformation[2]] = tmp_it
+                
             elif (transformation[0] == 2):
                 sched_str += "R(L" + str(transformation[3])+ ")"
             elif (transformation[0] == 3):
@@ -1589,7 +1594,21 @@ def get_schedule_str(program_json, sched_json):
                 sched_str += "Sh(L" + str(dim_index) + "," + str(shifting[1])+")"
                 
         if schedule["tiling"]:
-            if schedule["tiling"]["tiling_depth"] == 2:
+            if schedule["tiling"]["tiling_depth"] == 1:
+                first_dim = schedule["tiling"]["tiling_dims"][0]
+                
+                first_dim_index = transf_loop_nest.index(first_dim)
+                first_factor = schedule["tiling"]["tiling_factors"][0]
+                sched_str += (
+                    "T1(L"
+                    + str(first_dim_index)
+                    + ","
+                    + str(first_factor)
+                    + ")"
+                )
+                i = transf_loop_nest.index(first_dim)
+                transf_loop_nest[i : i + 1] = first_dim + "_outer", first_dim + "_inner"
+            elif schedule["tiling"]["tiling_depth"] == 2:
                 first_dim = schedule["tiling"]["tiling_dims"][0]
                 second_dim = schedule["tiling"]["tiling_dims"][1]
                 
@@ -1612,7 +1631,7 @@ def get_schedule_str(program_json, sched_json):
                 transf_loop_nest[i : i + 1] = first_dim + "_outer", second_dim + "_outer"
                 i = transf_loop_nest.index(second_dim)
                 transf_loop_nest[i : i + 1] = first_dim + "_inner", second_dim + "_inner"
-            else:
+            elif schedule["tiling"]["tiling_depth"] == 3:
                 first_dim = schedule["tiling"]["tiling_dims"][0]
                 second_dim = schedule["tiling"]["tiling_dims"][1]
                 third_dim = schedule["tiling"]["tiling_dims"][2]

@@ -92,7 +92,6 @@ def main(conf):
     
     # Fuse loaded training batches
     train_bl = train_bl_1 + train_bl_2 if len(train_bl_2) > 0 else train_bl_1
-
     # Validation
     validation_file_path = os.path.join( conf.experiment.base_path, "batched/valid/", f"{Path(conf.data_generation.valid_dataset_file).parts[-1][:-4]}_CPU.pt")
     if os.path.exists(validation_file_path):
@@ -137,6 +136,7 @@ def main(conf):
         log_every=1,
         train_device=train_device,
         validation_device=conf.training.validation_gpu,
+        max_batch_size=conf.data_generation.batch_size,
     )
 
 

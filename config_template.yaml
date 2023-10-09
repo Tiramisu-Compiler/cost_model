@@ -8,14 +8,14 @@ data_generation:
     benchmark_dataset_file: "/path/to/the/benchmarks/dataset"
     batch_size: 2048
     nb_processes: 4 # Number of processes to use when loading the data in parallel
-
-
+    min_functions_per_tree_footprint: 2 # Minimum number of functions accepted in a batch
 
 training: 
     log_file: "logs.txt" # Just the name
     lr: 0.001
     max_epochs: 1000 
-    gpu: "cuda:x" # GPU to train on. Example: cuda:2
+    training_gpu: "cuda:x" # GPU to train on. Example: cuda:2
+    validation_gpu: "cpu" # GPU to validate on. Usually the CPU is enough
     continue_training: False # Continue training from saved model checkpoint
     model_weights_path: "/path/to/model/weights" # Model weights to use for finetuning
 

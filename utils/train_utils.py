@@ -30,6 +30,7 @@ def train_model(
     logger,
     train_device,
     validation_device,
+    max_batch_size = 1024,
 ):
 
     since = time.time()
@@ -98,14 +99,14 @@ def train_model(
                     assert outputs.shape == labels.shape
                     
                     # Calculate the loss
-                    loss = criterion(outputs, labels)
+                    loss = criterion(outputs, labels)*labels.shape[0]/max_batch_size
                     
                     if phase == "train":
                         # Backpropagation
                         loss.backward()
                         optimizer.step()
                 pbar.set_description("Loss: {:.3f}".format(loss.item()))
-                running_loss += loss.item() * labels.shape[0]
+                running_loss += loss.item() * max_batch_size
                 # Send the labels back to the original device 
                 labels = labels.to(original_device)
                 epoch_end = time.time()

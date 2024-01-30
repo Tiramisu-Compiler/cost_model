@@ -7,29 +7,46 @@ import torch
 import wandb
 from torch.optim.lr_scheduler import OneCycleLR
 from tqdm import tqdm
-
+import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import init_process_group, destroy_process_group
 import os
 # Calculate the mean absolute percentage error
 def mape_criterion(inputs, targets):
     eps = 1e-5
     return 100 * torch.mean(torch.abs(targets - inputs) / (targets + eps))
 
-def ddp_setup(rank: int, world_size: int):
-  """
-  Args:
-      rank: Unique identifier of each process
-     world_size: Total number of processes
-  """
-  os.environ["MASTER_ADDR"] = "localhost"
-  os.environ["MASTER_PORT"] = "12355"
-  init_process_group(backend="nccl", rank=rank, world_size=world_size)
+def total_loss(inputs, targets):
 
+    y_pred = inputs
+    y_true = targets
+    indices = torch.tensor(list(range(10))).to(y_pred.device)
+    y_pred_sliced = torch.index_select(y_pred, 1, indices)
+    y_true_sliced = torch.index_select(y_true, 1, indices)
+    return torch.stack([ce_loss(y_pred_sliced, y_true_sliced), bce_loss(y_pred[:,10], y_true[:,10]), bce_loss(y_pred[:,11], y_true[:,11]), bce_loss(y_pred[:,12], y_true[:,12]), bce_loss(y_pred[:,13], y_true[:,13])], dim=0).sum(dim=0)/5
+
+def i_loss(inputs, targets):
+    return
+
+def ce_loss(inputs, targets):
+    ce_loss = nn.CrossEntropyLoss()
+    output = ce_loss(inputs, torch.max(targets,1)[1])
+    return output
+
+def bce_loss(inputs, targets):
+    bce = nn.BCELoss()
+    loss = bce(inputs, targets)
+    return loss
+
+def BinaryCrossEntropy_i(y_true, y_pred):
+    y_pred = np.clip(y_pred, 1e-7, 1 - 1e-7)
+    term_0 = (1-y_true) * np.log(1-y_pred + 1e-7)
+    term_1 = y_true * np.log(y_pred + 1e-7)
+    return -np.mean(term_0+term_1, axis=0)
 
 def train_model(
     config,
@@ -61,12 +78,12 @@ def train_model(
         dataloader_size["val"] += label.shape[0]
     
     # Use the 1cycle learning rate policy
-#     scheduler = OneCycleLR(
-#         optimizer,
-#         max_lr=max_lr,
-#         steps_per_epoch=len(dataloader["train"]),
-#         epochs=num_epochs,
-#     )
+    scheduler = OneCycleLR(
+        optimizer,
+        max_lr=max_lr,
+        steps_per_epoch=len(dataloader["train"]),
+        epochs=num_epochs,
+    )
     
     for epoch in range(num_epochs):
         epoch_start = time.time()
@@ -85,6 +102,7 @@ def train_model(
             model = model.to(device)
             model.device = device
             
+            device
             running_loss = 0.0
             pbar = tqdm(dataloader[phase])
             
@@ -97,8 +115,6 @@ def train_model(
                     inputs[1].to(device),
                     inputs[2].to(device),
                     inputs[3].to(device),
-                    inputs[4].to(device),
-                    inputs[5].to(device),
                 )
                 labels = labels.to(device)
                 
@@ -108,16 +124,15 @@ def train_model(
                 with torch.set_grad_enabled(phase == "train"):
                     # Get the model predictions
                     outputs = model(inputs)
+                    # print(f"labels shape {labels.shape} outputs shape {outputs.shape}")
                     assert outputs.shape == labels.shape
                     
                     # Calculate the loss
                     loss = criterion(outputs, labels)
-                    
                     if phase == "train":
                         # Backpropagation
                         loss.backward()
                         optimizer.step()
-#                         scheduler.step()
                 pbar.set_description("Loss: {:.3f}".format(loss.item()))
                 running_loss += loss.item() * labels.shape[0]
                 # Send the labels back to the original device 
@@ -185,6 +200,7 @@ def train_model(
                     )
             else:
                 train_loss = epoch_loss
+                scheduler.step()
     time_elapsed = time.time() - since
 
     print(
@@ -199,5 +215,4 @@ def train_model(
             time_elapsed // 60, time_elapsed % 60, best_loss
         )
     )
-    destroy_process_group()
     return losses, best_model

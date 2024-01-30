@@ -5,7 +5,7 @@ from hydra.core.config_store import ConfigStore
 from utils.data_utils import *
 from utils.modeling import *
 from utils.train_utils import *
-
+import torch
 
 @hydra.main(config_path="conf", config_name="config")
 def generate_datasets(conf):
@@ -14,10 +14,10 @@ def generate_datasets(conf):
     Args:
         conf (RecursiveLSTMConfig): The configuration of the repository.
     """
-    os.environ["CUDA_VISIBLE_DEVICES"] = [
-        conf.training.training_gpu,
-        conf.training.validation_gpu
-    ] if conf.training.validation_gpu != "cpu" else conf.training.training_gpu
+#     os.environ["CUDA_VISIBLE_DEVICES"] = [
+#         conf.training.training_gpu,
+#         conf.training.validation_gpu
+#     ] if conf.training.validation_gpu != "cpu" else conf.training.training_gpu
     # Validation
     val_repr_pkl_output_folder = os.path.join(
         conf.experiment.base_path, 
@@ -81,7 +81,6 @@ def generate_datasets(conf):
     # Delete generated dataset since it has been saved as a file
     del val_ds, val_bl, val_indices
     gc.collect()
-    
 #     #Training
     train_repr_pkl_output_folder = os.path.join(
         conf.experiment.base_path,
@@ -101,8 +100,8 @@ def generate_datasets(conf):
     train_ds, train_bl, train_indices, gpu_fitted_batches_index = load_pickled_repr(
         train_repr_pkl_output_folder,
         max_batch_size = conf.data_generation.batch_size,
-        store_device = "cuda:0",
-        train_device = "cuda:0"
+        store_device = conf.training.training_gpu,
+        train_device = conf.training.training_gpu
     )
     
     

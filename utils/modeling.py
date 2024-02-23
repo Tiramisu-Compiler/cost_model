@@ -1,7 +1,7 @@
 from unicodedata import bidirectional
 import torch
 from torch import nn
-from utils.data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
+from .data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
 
 def initialization_function_sparse(x):
     return nn.init.sparse_(x, sparsity=0.1)

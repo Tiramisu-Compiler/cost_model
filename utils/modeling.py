@@ -1,7 +1,7 @@
 from unicodedata import bidirectional
 import torch
 from torch import nn
-from utils.data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
+from .data_utils import MAX_NUM_TRANSFORMATIONS, MAX_TAGS
 
 # Define the architecture of the cost model
 class Model_Recursive_LSTM_v2(nn.Module):
@@ -10,7 +10,7 @@ class Model_Recursive_LSTM_v2(nn.Module):
         input_size,
         comp_embed_layer_sizes=[600, 350, 200, 180],
         drops=[0.225, 0.225, 0.225, 0.225],
-        output_size=14,
+        output_size=13,
         expr_embed_size=100,
         loops_tensor_size=2,
         device="cpu",
@@ -219,7 +219,6 @@ class Model_Recursive_LSTM_v2(nn.Module):
                 torch.sigmoid(out[:,10]).view(-1, 1),
                 torch.sigmoid(out[:,11]).view(-1, 1),
                 torch.sigmoid(out[:,12]).view(-1, 1),
-                torch.sigmoid(out[:,13]).view(-1, 1),
             ),
             dim=-1
         )

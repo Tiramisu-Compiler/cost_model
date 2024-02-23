@@ -27,7 +27,7 @@ def total_loss(inputs, targets):
     indices = torch.tensor(list(range(10))).to(y_pred.device)
     y_pred_sliced = torch.index_select(y_pred, 1, indices)
     y_true_sliced = torch.index_select(y_true, 1, indices)
-    return torch.stack([ce_loss(y_pred_sliced, y_true_sliced), bce_loss(y_pred[:,10], y_true[:,10]), bce_loss(y_pred[:,11], y_true[:,11]), bce_loss(y_pred[:,12], y_true[:,12]), bce_loss(y_pred[:,13], y_true[:,13])], dim=0).sum(dim=0)/5
+    return torch.stack([ce_loss(y_pred_sliced, y_true_sliced), bce_loss(y_pred[:,10], y_true[:,10]), bce_loss(y_pred[:,11], y_true[:,11]), bce_loss(y_pred[:,12], y_true[:,12])], dim=0).sum(dim=0)/4
 
 def i_loss(inputs, targets):
     return

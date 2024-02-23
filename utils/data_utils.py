@@ -375,7 +375,7 @@ def get_schedule_representation(
         
     #     output = output + [parallelized, parallelized_loop]
         output = output + [parallelized]
-        output = output + [skewed]
+        # output = output + [skewed]
         # Unrolling
         unrolled = 0
         if comp_schedule_dict["unrolling_factor"]:

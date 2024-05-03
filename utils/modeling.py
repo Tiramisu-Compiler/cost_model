@@ -75,7 +75,6 @@ class Model_Recursive_LSTM_v2(nn.Module):
                 nn.Linear(concat_layer_sizes[i], concat_layer_sizes[i + 1], bias=True)
             )
             initialization_function_xavier(self.concat_layers[i].weight)
-            nn.init.zeros_(self.concat_layers[i].weight)
             self.concat_dropouts.append(nn.Dropout(drops[i]))
         # Output layer
         self.predict = nn.Linear(regression_layer_sizes[-1], output_size, bias=True)

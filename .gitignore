@@ -5,6 +5,7 @@ __pycache__/
 *$py.class
 conf/*.yaml
 *.pkl 
+!data_samples/*.pkl
 .idea/
 pickled_repr/
 notebooks/

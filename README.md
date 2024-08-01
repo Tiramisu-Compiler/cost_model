@@ -14,7 +14,7 @@ conda activate cost_model_env
 ```  
 
 ## Configuring the repository
-All of the main scripts use Hydra for configuration management. To configure the repository, fill the configuration template `conf/conf.yml` with the paths and parameters required.
+All of the main scripts use Hydra for configuration management. To configure the repository, fill the configuration template `conf/config.yaml` with the paths and parameters required.
 While using one of the following script files, you can override any configuration in the conf file. For example, to modify the batch size to 512 for training, use the following command. The parameter should be included with its section name.  
 ```
 python generate_dataset.py data_generation.batch_size=512

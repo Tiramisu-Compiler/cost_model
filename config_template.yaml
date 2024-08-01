@@ -8,7 +8,7 @@ data_generation:
     benchmark_dataset_file: "/path/to/the/benchmarks/dataset"
     batch_size: 2048
     nb_processes: 4 # Number of processes to use when loading the data in parallel
-    min_functions_per_tree_footprint: 2 # Minimum number of functions accepted in a batch
+    min_functions_per_tree_footprint: 2 # Minimum number of functions accepted in a batch. Set to 0 if you are using a small data sample
 
 training: 
     log_file: "logs.txt" # Just the name

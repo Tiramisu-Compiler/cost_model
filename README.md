@@ -20,12 +20,16 @@ While using one of the following script files, you can override any configuratio
 python generate_dataset.py data_generation.batch_size=512
 ```
 
-## Generating the dataset
+## Processing the dataset
 Currently, we have separated the data loading and training from each other. This is because the data loading is very time-consuming, and we don't want to redo it for every training. To solve this, we run a script to load the raw data (JSON), extract the representation for each datapoint, and then save the batched data in a `.pt` file that can be loaded directly into memory for training. We call this process data generation.
 To generate the dataset, run the python script `generate_dataset.py` (after configuring the repository):  
 ```bash
 python generate_dataset.py
 ```
+
+#### Dataset Sample
+
+A sample from the dataset is provided in the `dataset_samples` folder as a pickle file. This sample contains approximately 80,000 data points, divided into a training set and a validation set. The training set includes 600 synthetic Tiramisu programs (\~60,000 schedules), while the validation set consists of 125 synthetic programs (\~20,000 schedules).
 
 ## Training the model
 To run the training, run the python script `train_model.py` (after configuring the repository and generating the dataset):  

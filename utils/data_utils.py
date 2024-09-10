@@ -1433,7 +1433,7 @@ def get_padded_initial_iteration_domain(program_json,comp_name, pad=True):
         
         for iter_name in iterators_in_lower:
             col_idx = comp_dict['iterators'].index(iter_name)
-            if '-'+iter_name in upper_bound:
+            if '-'+iter_name in lower_bound:
                 coeff_mat[i*2,col_idx]=-1
             else:
                 coeff_mat[i*2,col_idx]=+1

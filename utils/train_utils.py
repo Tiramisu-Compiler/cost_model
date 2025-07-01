@@ -135,9 +135,9 @@ def train_model(
                 if config.wandb.use_wandb:
                     wandb.log(
                         {
-                            "best_msle": best_loss,
-                            "train_msle": train_loss,
-                            "val_msle": epoch_loss,
+                            "best_mape": best_loss,
+                            "train_mape": train_loss,
+                            "val_mape": epoch_loss,
                             "epoch": epoch,
                         }
                     )
